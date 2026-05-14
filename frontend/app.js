@@ -1324,16 +1324,16 @@ const app = {
     });
   },
 
-  // ── REGLAS ──────────────────────────────────────────────────────────────────
+// ── REGLAS ──────────────────────────────────────────────────────────────────
 
   renderRules(main) {
     main.innerHTML = `
       <h2>Reglas y puntuación</h2>
 
       <div class="card">
-        <h3>📋 Las dos pollas</h3>
+        <h3>📋 Reglas</h3>
         <p style="font-size:14px;color:var(--color-text-muted);line-height:1.9">
-          Hay <strong>dos pollas independientes</strong>, cada una con su propio pozo y ranking:
+          Hay <strong>dos pollas independientes</strong>, cada una con su propio pozo:
         </p>
         <ul style="font-size:14px;color:var(--color-text-muted);line-height:2;margin-top:8px;padding-left:16px">
           <li><strong>Polla 1 — Fase de Grupos ($20):</strong> pronosticas los partidos de la fase de grupos. El pozo se reparte al finalizar los grupos.</li>
@@ -1347,7 +1347,7 @@ const app = {
       <div class="card">
         <h3>💰 Repartición del pozo</h3>
         <p style="font-size:14px;color:var(--color-text-muted);line-height:1.8">
-          Solo participan en el ranking y el pozo quienes tengan el <strong>pago confirmado</strong> por el administrador. El pozo neto se reparte así:
+          Solo participan quienes tengan el <strong>pago confirmado</strong>. El pozo neto se reparte así:
         </p>
         <ul style="font-size:14px;line-height:2;list-style:none;margin-top:8px">
           <li>🥇 Primer lugar: <strong>70%</strong></li>
@@ -1359,9 +1359,9 @@ const app = {
       <div class="card">
         <h3>⏱️ Cierre de predicciones</h3>
         <p style="font-size:14px;color:var(--color-text-muted);line-height:1.8">
-          Las predicciones de <strong>grupos</strong> se cierran 15 minutos antes del primer partido del Mundial (11 de junio de 2026, hora Ecuador).
-          Las predicciones de <strong>eliminatorias</strong> se cierran 5 minutos antes de cada partido.
-          Las <strong>apuestas diarias</strong> también cierran 5 minutos antes de cada partido.
+          Las predicciones de <strong>grupos</strong> se cierran 5 minutos antes del primer partido del Mundial (11 de junio de 2026, hora Ecuador).
+          Las predicciones de <strong>eliminatorias</strong> se cierran 5 minutos antes del primer partido de dieciseisavos de final.
+          Las <strong>apuestas diarias</strong> se cierran 5 minutos antes de cada partido.
           Todos los horarios son en hora Ecuador (GMT-5).
         </p>
       </div>
@@ -1385,7 +1385,6 @@ const app = {
         <h3>🎯 Puntos · Fase de Grupos</h3>
         <ul style="font-size:14px;line-height:2;list-style:none">
           <li>🎯 Marcador exacto: <strong>5 puntos</strong></li>
-          <li>🤝 Empate exacto: <strong>5 puntos</strong></li>
           <li>📏 Ganador correcto + diferencia exacta: <strong>3 puntos</strong></li>
           <li>✅ Solo ganador correcto: <strong>2 puntos</strong></li>
         </ul>
@@ -1404,20 +1403,16 @@ const app = {
         <h3>⚡ Puntos · Eliminatorias (con penales)</h3>
         <ul style="font-size:14px;line-height:2;list-style:none">
           <li>🏆 Marcador exacto + penales exactos + ganador correcto: <strong>8 puntos</strong></li>
-          <li>🎯 Marcador exacto + penales exactos: <strong>5 puntos</strong></li>
-          <li>✅ Empate correcto + ganador correcto en penales: <strong>3 puntos</strong></li>
-          <li>👍 Solo ganador correcto: <strong>2 puntos</strong></li>
+          <li>🎯 Marcador exacto: <strong>5 puntos</strong></li>
+          <li>👍 Empate correcto + ganador correcto en penales: <strong>3 puntos</strong></li>
+          <li>📏 Ganador correcto + diferencia exacta: <strong>3 puntos</strong></li>
+          <li>✅ Solo ganador correcto: <strong>2 puntos</strong></li>
         </ul>
       </div>
 
       <div class="card">
         <h3>🏅 Puntos · Podio</h3>
         <p style="font-size:13px;color:var(--color-text-muted);margin-bottom:8px">El podio se calcula automáticamente de tus pronósticos de la Gran Final y el Tercer puesto.</p>
-        <ul style="font-size:14px;line-height:2;list-style:none">
-          <li>🥇 Campeón: <strong>15 puntos</strong></li>
-          <li>🥈 Subcampeón: <strong>10 puntos</strong></li>
-          <li>🥉 Tercer lugar: <strong>6 puntos</strong></li>
-        </ul>
       </div>
 
       <div class="card">
