@@ -687,10 +687,9 @@ app.post('/api/daily-bets', authMiddleware, (req, res) => {
   if (isDailyBetLocked(match.match_date, match.match_time))
     return res.status(400).json({ error: 'Las apuestas para este partido ya cerraron (5 min antes del inicio).' });
 
-  const min = parseFloat(db.prepare('SELECT value FROM settings WHERE key = ?').get('daily_bet_min').value);
-  const max = parseFloat(db.prepare('SELECT value FROM settings WHERE key = ?').get('daily_bet_max').value);
-  if (bet_amount < min || bet_amount > max)
-    return res.status(400).json({ error: `El monto debe estar entre $${min} y $${max}` });
+  const amount = parseFloat(db.prepare('SELECT value FROM settings WHERE key = ?').get('daily_bet_amount')?.value || 2);
+  if (parseFloat(bet_amount) !== amount)
+    return res.status(400).json({ error: `El monto de apuesta es $${amount}` });
 
   db.prepare(`
     INSERT INTO daily_bets (user_id, match_id, pred_home, pred_away, bet_amount)
