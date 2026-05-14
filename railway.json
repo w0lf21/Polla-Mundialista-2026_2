@@ -1,0 +1,8 @@
+{
+  "build": {
+    "buildCommand": "npm --prefix backend install && node backend/initDb.js"
+  },
+  "deploy": {
+    "startCommand": "node backend/server.js"
+  }
+}
