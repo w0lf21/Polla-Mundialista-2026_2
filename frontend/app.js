@@ -1496,7 +1496,7 @@ const app = {
       <div class="card">
         <h3>🔄 Eliminatorias con equipos reales</h3>
         <p style="font-size:14px;color:var(--color-text-muted);line-height:1.8">
-          En el Pronóstico 2, los equipos de cada partido eliminatorio corresponden a los clasificados <strong>reales</strong> de la fase de grupos, no a pronósticos. Ya sabrás quién clasificó antes de pronosticar. El podio se determina automáticamente según tus pronósticos de la Gran Final y el Tercer puesto.
+          En el Pronóstico 2, los equipos de cada partido eliminatorio se basan en los clasificados <strong>reales</strong> de la fase de grupos, no en suposiciones ni predicciones. Es decir, ya conocerás qué equipos avanzaron antes de hacer tu pronóstico.
         </p>
       </div>
 
