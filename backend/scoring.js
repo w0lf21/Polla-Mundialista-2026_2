@@ -140,14 +140,9 @@ function calcUserTotalPoints(db, userId) {
     if (pts === POINTS.EXACT_SCORE || pts === POINTS.KO_EXACT || pts === POINTS.KO_EXACT_PEN_ALL) exactScores++;
   }
 
-  const podiumPred = db.prepare('SELECT * FROM podium_predictions WHERE user_id = ?').get(userId);
-  const podiumReal = db.prepare('SELECT * FROM podium_real WHERE id = 1').get();
-
-  if (podiumPred && podiumReal) {
-    if (podiumReal.first_place && podiumPred.first_place === podiumReal.first_place) total += POINTS.CHAMPION;
-    if (podiumReal.second_place && podiumPred.second_place === podiumReal.second_place) total += POINTS.RUNNER_UP;
-    if (podiumReal.third_place && podiumPred.third_place === podiumReal.third_place) total += POINTS.THIRD_PLACE;
-  }
+  // NOTA: El podio ya no otorga puntos adicionales. Los puntos provienen únicamente
+  // de acertar los partidos de la Gran Final y el Tercer puesto en eliminatorias.
+  // (Antes se sumaban 15/10/6 pero eso duplicaba el conteo del mismo pronóstico.)
 
   return { total, correctPredictions, exactScores };
 }
