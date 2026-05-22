@@ -994,9 +994,7 @@ const app = {
 
     main.innerHTML = `
       <h2>Podio final</h2>
-      <div class="notice">El podio se determina automáticamente según tus pronósticos de la <strong>Gran Final</strong> y el partido de <strong>Tercer puesto</strong>. Completa esos partidos en la sección Eliminatorias.<br><br>
-        🥇 Campeón: <strong>15 pts</strong> · 🥈 Subcampeón: <strong>10 pts</strong> · 🥉 Tercer lugar: <strong>6 pts</strong>
-      </div>
+      <div class="notice">El podio se determina automáticamente según tus pronósticos de la <strong>Gran Final</strong> y el partido de <strong>Tercer puesto</strong>. Es una vista informativa para comparar tu pronóstico con el resultado real — los puntos se obtienen al acertar esos partidos en la sección Eliminatorias.</div>
 
       <h3 style="margin-top:24px;margin-bottom:12px;font-size:16px;color:var(--color-primary)">🔮 Tu podio pronosticado</h3>
       <div class="card">
@@ -1532,8 +1530,8 @@ const app = {
       </div>
 
       <div class="card">
-        <h3>🏅 Puntos · Podio</h3>
-        <p style="font-size:13px;color:var(--color-text-muted);margin-bottom:8px">El podio se calcula automáticamente de tus pronósticos de la Gran Final y el Tercer puesto.</p>
+        <h3>🏅 Podio final</h3>
+        <p style="font-size:13px;color:var(--color-text-muted);margin-bottom:8px">El podio (campeón, subcampeón y tercer lugar) se muestra automáticamente a partir de tus pronósticos de la Gran Final y el Tercer puesto. Es solo una vista comparativa — <strong>no otorga puntos adicionales</strong>; los puntos provienen únicamente de acertar esos partidos en eliminatorias.</p>
       </div>
 
       <div class="card">
