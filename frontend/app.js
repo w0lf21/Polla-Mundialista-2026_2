@@ -138,20 +138,50 @@ const app = {
     const loginScreen = document.getElementById('login-screen');
     const appScreen = document.getElementById('app-screen');
 
-    // Animación de salida del login — zoom out como cámara alejándose
-    loginScreen.style.animation = 'loginFadeOut 0.5s ease forwards';
+    // Reproducir sonido de entrada (descomenta cuando subas el archivo)
+    this.playEntrySound();
 
-    setTimeout(() => {
-      loginScreen.classList.remove('active');
-      loginScreen.style.animation = '';
-      appScreen.classList.add('active');
-      appScreen.style.animation = 'appStadiumReveal 0.6s ease both';
-    }, 450);
+    // Crear overlay de zoom + flash dorado
+    const overlay = document.createElement('div');
+    overlay.id = 'entry-overlay';
+    overlay.innerHTML = `
+      <div class="entry-flash"></div>
+      <img src="logo-mundial-2026.jpg" alt="" class="entry-logo">
+    `;
+    document.body.appendChild(overlay);
 
+    // Pre-cargar la app debajo del overlay
     document.getElementById('header-username').textContent = this.user.display_name;
     await this.refreshPoints();
     this.renderNav();
     this.navigate('fixture');
+
+    // Transición: login → overlay con zoom → flash → app
+    loginScreen.style.transition = 'opacity 0.3s ease';
+    loginScreen.style.opacity = '0';
+
+    setTimeout(() => {
+      loginScreen.classList.remove('active');
+      loginScreen.style.opacity = '';
+      loginScreen.style.transition = '';
+      appScreen.classList.add('active');
+    }, 300);
+
+    // Remover overlay después de toda la animación (1.6s)
+    setTimeout(() => {
+      overlay.style.opacity = '0';
+      setTimeout(() => overlay.remove(), 400);
+    }, 1600);
+  },
+
+  playEntrySound() {
+    try {
+      const audio = new Audio('entry-sound.mp3');
+      audio.volume = 0.6;
+      audio.play().catch(() => {
+        // El navegador bloqueó el sonido o no existe el archivo, ignorar silenciosamente
+      });
+    } catch (e) { /* archivo no existe aún, ignorar */ }
   },
 
   logout() {
