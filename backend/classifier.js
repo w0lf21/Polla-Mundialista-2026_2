@@ -62,26 +62,31 @@ function calcGroupStandings(groupCode, groupTeams, matchPredictions) {
 
   for (let i = 0; i < groupTeams.length; i++) {
     for (let j = i + 1; j < groupTeams.length; j++) {
-      const home = groupTeams[i];
-      const away = groupTeams[j];
+      const teamA = groupTeams[i];
+      const teamB = groupTeams[j];
+      // Aceptar el partido en cualquier orden de local/visitante
       const pred = matchPredictions.find(p =>
-        p.home_team === home && p.away_team === away && p.group_name === groupCode
+        p.group_name === groupCode &&
+        ((p.home_team === teamA && p.away_team === teamB) ||
+         (p.home_team === teamB && p.away_team === teamA))
       );
       if (!pred || pred.pred_home == null || pred.pred_away == null) continue;
 
-      const h = parseInt(pred.pred_home);
-      const a = parseInt(pred.pred_away);
+      // Asignar goles según quién fue local/visitante en el fixture real
+      const aIsHome = pred.home_team === teamA;
+      const goalsA = parseInt(aIsHome ? pred.pred_home : pred.pred_away);
+      const goalsB = parseInt(aIsHome ? pred.pred_away : pred.pred_home);
 
-      standings[home].played++;
-      standings[away].played++;
-      standings[home].gf += h; standings[home].ga += a;
-      standings[away].gf += a; standings[away].ga += h;
-      standings[home].gd = standings[home].gf - standings[home].ga;
-      standings[away].gd = standings[away].gf - standings[away].ga;
+      standings[teamA].played++;
+      standings[teamB].played++;
+      standings[teamA].gf += goalsA; standings[teamA].ga += goalsB;
+      standings[teamB].gf += goalsB; standings[teamB].ga += goalsA;
+      standings[teamA].gd = standings[teamA].gf - standings[teamA].ga;
+      standings[teamB].gd = standings[teamB].gf - standings[teamB].ga;
 
-      if (h > a) standings[home].pts += 3;
-      else if (a > h) standings[away].pts += 3;
-      else { standings[home].pts += 1; standings[away].pts += 1; }
+      if (goalsA > goalsB) standings[teamA].pts += 3;
+      else if (goalsB > goalsA) standings[teamB].pts += 3;
+      else { standings[teamA].pts += 1; standings[teamB].pts += 1; }
     }
   }
 
