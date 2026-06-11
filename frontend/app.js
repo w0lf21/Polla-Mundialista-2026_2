@@ -527,9 +527,8 @@ const app = {
     container.innerHTML = '<div style="text-align:center;color:var(--color-text-muted);padding:2rem">Cargando mi pronóstico...</div>';
 
     try {
-      const [classified, koTeamsData, freshPreds, podiumData] = await Promise.all([
+      const [classified, freshPreds, podiumData] = await Promise.all([
         this.api('/predictions/classified'),
-        this.api('/predictions/ko-teams'),
         this.api('/predictions'),
         this.api('/podium').catch(() => null)
       ]);
@@ -612,41 +611,98 @@ const app = {
           </div>
         </div>` : '';
 
-      // ── Bracket con predicciones ──
-      const mt = koTeamsData.matchTeams;
+      // ── Bracket: equipos REALES del fixture + pronósticos del usuario en cascada ──
+      // R32 arranca con los equipos reales que el admin va completando
+      // De ahí en adelante, cada llave se llena con el ganador que el usuario pronosticó
+      const matchesById = {};
+      this.matches.forEach(m => { matchesById[m.id] = m; });
+
+      const QF_PAIRS  = { 'QF-1': ['R32-2','R32-6'], 'QF-2': ['R32-1','R32-3'], 'QF-3': ['R32-4','R32-5'], 'QF-4': ['R32-7','R32-8'], 'QF-5': ['R32-11','R32-12'], 'QF-6': ['R32-9','R32-10'], 'QF-7': ['R32-15','R32-14'], 'QF-8': ['R32-13','R32-16'] };
+      const SF_PAIRS  = { 'SF-1': ['QF-1','QF-2'], 'SF-2': ['QF-3','QF-4'], 'SF-3': ['QF-5','QF-6'], 'SF-4': ['QF-7','QF-8'], 'SF-5': ['SF-1','SF-2'], 'SF-6': ['SF-3','SF-4'] };
+      const FINAL_PAIR = ['SF-5','SF-6'];
+
+      // Calcula el ganador pronosticado por el usuario para una llave
+      // (deriva del marcador; si empate, usa pred_winner para penales)
+      const userWinnerOf = (matchId, homeCode, awayCode) => {
+        const pred = this.predictions[matchId];
+        if (!pred) return null;
+        const ph = pred.pred_home != null ? parseInt(pred.pred_home) : null;
+        const pa = pred.pred_away != null ? parseInt(pred.pred_away) : null;
+        if (ph != null && pa != null && ph !== pa) return ph > pa ? homeCode : awayCode;
+        return pred.pred_winner || null;
+      };
+      const userLoserOf = (matchId, homeCode, awayCode) => {
+        const w = userWinnerOf(matchId, homeCode, awayCode);
+        if (!w) return null;
+        return w === homeCode ? awayCode : homeCode;
+      };
+
+      // Resuelve los equipos de cada llave en cascada (memoizado)
+      const resolved = {};
+      const resolveMatch = (matchId) => {
+        if (resolved[matchId]) return resolved[matchId];
+
+        let homeCode = null, awayCode = null;
+
+        if (matchId.startsWith('R32')) {
+          // R32 usa los equipos REALES del fixture
+          const m = matchesById[matchId];
+          homeCode = m?.home_team || null;
+          awayCode = m?.away_team || null;
+        } else if (QF_PAIRS[matchId]) {
+          const [a, b] = QF_PAIRS[matchId];
+          const ra = resolveMatch(a);
+          const rb = resolveMatch(b);
+          homeCode = userWinnerOf(a, ra.homeCode, ra.awayCode);
+          awayCode = userWinnerOf(b, rb.homeCode, rb.awayCode);
+        } else if (SF_PAIRS[matchId]) {
+          const [a, b] = SF_PAIRS[matchId];
+          const ra = resolveMatch(a);
+          const rb = resolveMatch(b);
+          homeCode = userWinnerOf(a, ra.homeCode, ra.awayCode);
+          awayCode = userWinnerOf(b, rb.homeCode, rb.awayCode);
+        } else if (matchId === 'FINAL') {
+          const [a, b] = FINAL_PAIR;
+          const ra = resolveMatch(a);
+          const rb = resolveMatch(b);
+          homeCode = userWinnerOf(a, ra.homeCode, ra.awayCode);
+          awayCode = userWinnerOf(b, rb.homeCode, rb.awayCode);
+        } else if (matchId === 'TP') {
+          // 3er puesto: perdedores de SF-5 y SF-6 según el usuario
+          const ra = resolveMatch('SF-5');
+          const rb = resolveMatch('SF-6');
+          homeCode = userLoserOf('SF-5', ra.homeCode, ra.awayCode);
+          awayCode = userLoserOf('SF-6', rb.homeCode, rb.awayCode);
+        }
+
+        resolved[matchId] = { homeCode, awayCode };
+        return resolved[matchId];
+      };
+
       const myMatchCard = (matchId) => {
-        const teams = mt[matchId];
-        if (!teams) return `<div class="bk-match empty">?</div>`;
-        const home = teams.home;
-        const away = teams.away;
+        const { homeCode, awayCode } = resolveMatch(matchId);
+        const home = homeCode ? this.teamByCode(homeCode) : null;
+        const away = awayCode ? this.teamByCode(awayCode) : null;
         const pred = this.predictions[matchId];
         const hasPred = !!(pred && (pred.pred_home != null || pred.pred_winner != null));
 
-        // Ganador: derivado del marcador; si es empate, del pred_winner (penales)
-        let predWinner = null;
-        if (pred) {
-          const ph = pred.pred_home != null ? parseInt(pred.pred_home) : null;
-          const pa = pred.pred_away != null ? parseInt(pred.pred_away) : null;
-          if (ph != null && pa != null && ph !== pa) {
-            predWinner = ph > pa ? (home?.code || null) : (away?.code || null);
-          } else {
-            predWinner = pred.pred_winner || null;
-          }
-        }
+        const predWinner = homeCode && awayCode ? userWinnerOf(matchId, homeCode, awayCode) : null;
 
         const showScore = pred && pred.pred_home != null;
         const penH = pred && pred.pred_pen_home != null ? `(${pred.pred_pen_home})` : '';
         const penA = pred && pred.pred_pen_away != null ? `(${pred.pred_pen_away})` : '';
 
+        if (!home && !away) return `<div class="bk-match empty"><div class="bk-team"><span class="bk-name" style="opacity:0.5">Por definir</span></div><div class="bk-team"><span class="bk-name" style="opacity:0.5">Por definir</span></div></div>`;
+
         return `<div class="bk-match${hasPred ? ' played' : ''}">
           <div class="bk-team ${predWinner && home && predWinner === home.code ? 'winner' : predWinner && home ? 'loser' : ''}">
             <span class="bk-flag">${home?.flag || '?'}</span>
-            <span class="bk-name">${home?.name || '?'}</span>
+            <span class="bk-name">${home?.name || 'Por definir'}</span>
             ${showScore ? `<span class="bk-score">${pred.pred_home}${penH}</span>` : ''}
           </div>
           <div class="bk-team ${predWinner && away && predWinner === away.code ? 'winner' : predWinner && away ? 'loser' : ''}">
             <span class="bk-flag">${away?.flag || '?'}</span>
-            <span class="bk-name">${away?.name || '?'}</span>
+            <span class="bk-name">${away?.name || 'Por definir'}</span>
             ${showScore ? `<span class="bk-score">${pred.pred_away}${penA}</span>` : ''}
           </div>
         </div>`;
