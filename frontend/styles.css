@@ -739,3 +739,62 @@ h4 { font-size: 13px; font-weight: 600; margin-bottom: 4px; color: var(--color-t
   main { padding: 0.75rem 12px 2rem; }
   .metric-value { font-size: 18px; }
 }
+
+/* ── ANIMACIÓN DE ENTRADA (zoom + flash dorado) ──────────────────────────────── */
+
+#entry-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: #0a0a0f;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  transition: opacity 0.4s ease;
+  pointer-events: none;
+}
+
+#entry-overlay .entry-logo {
+  width: 150px;
+  height: auto;
+  position: relative;
+  z-index: 2;
+  animation: entryLogoZoom 1.4s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  filter: drop-shadow(0 0 0 rgba(201, 168, 76, 0));
+}
+
+#entry-overlay .entry-flash {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 215, 100, 0.95) 0%, rgba(201, 168, 76, 0.7) 30%, rgba(201, 168, 76, 0) 70%);
+  transform: translate(-50%, -50%);
+  z-index: 1;
+  animation: entryGoldFlash 1.4s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  opacity: 0;
+}
+
+@keyframes entryLogoZoom {
+  0%   { transform: scale(0.6); opacity: 0; }
+  25%  { transform: scale(1); opacity: 1; filter: drop-shadow(0 0 0 rgba(201, 168, 76, 0)); }
+  60%  { transform: scale(1.15); filter: drop-shadow(0 0 30px rgba(255, 215, 100, 0.8)); }
+  85%  { transform: scale(1.35); opacity: 1; filter: drop-shadow(0 0 50px rgba(255, 215, 100, 1)); }
+  100% { transform: scale(1.8); opacity: 0; filter: drop-shadow(0 0 60px rgba(255, 215, 100, 0)); }
+}
+
+@keyframes entryGoldFlash {
+  0%   { opacity: 0; width: 20px; height: 20px; }
+  50%  { opacity: 0; width: 20px; height: 20px; }
+  70%  { opacity: 1; width: 300px; height: 300px; }
+  85%  { opacity: 0.8; width: 1200px; height: 1200px; }
+  100% { opacity: 0; width: 2400px; height: 2400px; }
+}
+
+/* Reducir/eliminar animación si el usuario prefiere menos movimiento */
+@media (prefers-reduced-motion: reduce) {
+  #entry-overlay .entry-logo { animation-duration: 0.4s; }
+  #entry-overlay .entry-flash { display: none; }
+}
