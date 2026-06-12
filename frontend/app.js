@@ -811,18 +811,69 @@ const app = {
 
   // ── VER PRONÓSTICOS DE OTRO USUARIO ────────────────────────────────────────
 
-  async showUserPredictions(userId, displayName) {
+  async showUserPredictions(userId) {
+    const displayName = (this._lbNames && this._lbNames[userId]) || 'Participante';
+    document.getElementById('user-pred-modal')?.remove();
+
     const modal = document.createElement('div');
     modal.id = 'user-pred-modal';
-    modal.style.cssText = 'position:fixed;inset:0;z-index:8000;background:rgba(0,0,0,0.85);overflow-y:auto;padding:16px';
     modal.innerHTML = `
-      <div style="max-width:900px;margin:0 auto;background:var(--color-surface);border-radius:var(--radius-lg);overflow:hidden">
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 18px;background:var(--color-background-secondary);border-bottom:1px solid var(--color-border)">
-          <div style="font-weight:700;font-size:15px">👁 Pronósticos de <span style="color:var(--color-primary)">${displayName}</span></div>
-          <button onclick="document.getElementById('user-pred-modal').remove()" style="background:transparent;border:none;color:var(--color-text-muted);font-size:20px;cursor:pointer;line-height:1">✕</button>
+      <style>
+        #user-pred-modal { position:fixed; inset:0; z-index:8000; background:rgba(0,0,0,0.82); display:flex; align-items:flex-start; justify-content:center; padding:20px 10px; overflow-y:auto; }
+        #user-pred-modal .updm-panel { width:min(980px,100%); background:var(--color-background, #101018); border:1px solid var(--color-border); border-radius:14px; display:flex; flex-direction:column; max-height:calc(100vh - 40px); box-shadow:0 20px 60px rgba(0,0,0,0.5); }
+        #user-pred-modal .updm-head { display:flex; justify-content:space-between; align-items:center; gap:10px; padding:13px 16px; border-bottom:1px solid var(--color-border); flex-shrink:0; }
+        #user-pred-modal .updm-title { font-weight:700; font-size:15px; }
+        #user-pred-modal .updm-close { background:transparent; border:1px solid var(--color-border); color:var(--color-text-muted); font-size:15px; cursor:pointer; line-height:1; border-radius:8px; padding:5px 10px; }
+        #user-pred-modal .updm-close:hover { color:var(--color-text); }
+        #user-pred-modal .updm-body { padding:14px 16px 20px; overflow-y:auto; }
+        #user-pred-modal h3.updm-h { font-size:13px; color:var(--color-primary); margin:18px 0 8px; text-transform:uppercase; letter-spacing:0.5px; }
+        #user-pred-modal h3.updm-h:first-child { margin-top:0; }
+        #user-pred-modal .updm-summary { padding:9px 12px; background:var(--color-surface); border:1px solid var(--color-border); border-radius:10px; font-size:12.5px; margin-bottom:4px; }
+        #user-pred-modal .updm-note { padding:8px 12px; background:rgba(201,168,76,0.07); border:1px solid rgba(201,168,76,0.2); border-radius:10px; font-size:12px; color:var(--color-text-muted); margin:10px 0 0; }
+        #user-pred-modal .updm-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(225px,1fr)); gap:8px; }
+        #user-pred-modal .updm-card { background:var(--color-surface); border:1px solid var(--color-border); border-radius:10px; padding:8px; }
+        #user-pred-modal .updm-gtitle { font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:6px; }
+        #user-pred-modal table.updm-t { width:100%; border-collapse:collapse; font-size:12px; }
+        #user-pred-modal table.updm-t th { font-size:10px; color:var(--color-text-muted); font-weight:500; padding:2px 4px; text-align:left; }
+        #user-pred-modal table.updm-t td { padding:3px 4px; white-space:nowrap; }
+        #user-pred-modal .updm-scores { margin-top:8px; padding-top:6px; border-top:1px solid var(--color-border); }
+        #user-pred-modal .updm-scores-title { font-size:10px; font-weight:600; color:var(--color-text-muted); margin-bottom:4px; text-transform:uppercase; letter-spacing:0.5px; }
+        #user-pred-modal .updm-mrow { display:flex; align-items:center; gap:4px; font-size:11px; padding:2px 0; }
+        #user-pred-modal .updm-mrow .l { flex:1; text-align:right; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        #user-pred-modal .updm-mrow .r { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        #user-pred-modal .updm-mrow .s { font-weight:700; min-width:34px; text-align:center; background:var(--color-background-secondary, rgba(255,255,255,0.05)); border-radius:4px; padding:1px 4px; flex-shrink:0; }
+        #user-pred-modal .updm-bwrap { width:100%; overflow-x:auto; padding-bottom:8px; -webkit-overflow-scrolling:touch; }
+        #user-pred-modal .updm-bracket { display:flex; gap:0; min-height:560px; align-items:stretch; min-width:1100px; }
+        #user-pred-modal .updm-side { display:flex; flex-direction:row; gap:6px; flex:1; }
+        #user-pred-modal .updm-right { justify-content:flex-end; }
+        #user-pred-modal .updm-col { display:flex; flex-direction:column; min-width:140px; flex-shrink:0; }
+        #user-pred-modal .updm-clabel { font-size:10px; font-weight:700; color:var(--color-primary); text-transform:uppercase; letter-spacing:0.5px; text-align:center; padding:4px 0 8px; }
+        #user-pred-modal .updm-cmatches { display:flex; flex-direction:column; justify-content:space-around; flex:1; gap:4px; }
+        #user-pred-modal .updm-center { display:flex; flex-direction:column; align-items:center; justify-content:center; min-width:160px; flex-shrink:0; padding:0 8px; border-left:1px solid var(--color-border); border-right:1px solid var(--color-border); }
+        #user-pred-modal .updm-center .updm-bk { width:100%; }
+        #user-pred-modal .updm-bk { background:var(--color-surface); border:1px solid var(--color-border); border-radius:10px; overflow:hidden; margin-bottom:4px; }
+        #user-pred-modal .updm-bk.played { border-color:rgba(201,168,76,0.35); }
+        #user-pred-modal .updm-bk.empty { padding:8px; font-size:11px; color:var(--color-text-muted); font-style:italic; text-align:center; }
+        #user-pred-modal .updm-team { display:flex; align-items:center; gap:5px; padding:4px 7px; font-size:11px; border-bottom:1px solid var(--color-border); }
+        #user-pred-modal .updm-team:last-child { border-bottom:none; }
+        #user-pred-modal .updm-team.winner { background:rgba(201,168,76,0.1); font-weight:700; color:var(--color-primary); }
+        #user-pred-modal .updm-team.loser { opacity:0.4; }
+        #user-pred-modal .updm-flag { font-size:13px; flex-shrink:0; }
+        #user-pred-modal .updm-name { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        #user-pred-modal .updm-score { font-weight:700; font-size:12px; flex-shrink:0; }
+        #user-pred-modal .updm-hint { font-size:11px; color:var(--color-text-muted); text-align:center; padding:4px 0; font-style:italic; }
+        @media(min-width:1200px){ #user-pred-modal .updm-hint { display:none; } }
+        #user-pred-modal .updm-podium { margin-top:14px; padding:10px; background:var(--color-surface); border:1px solid var(--color-border); border-radius:10px; }
+        #user-pred-modal .updm-chips { display:flex; flex-wrap:wrap; gap:6px; }
+        #user-pred-modal .updm-chip { font-size:12px; padding:3px 8px; background:rgba(201,168,76,0.1); border:1px solid rgba(201,168,76,0.25); border-radius:12px; }
+      </style>
+      <div class="updm-panel">
+        <div class="updm-head">
+          <div class="updm-title">👁 Pronósticos de <span style="color:var(--color-primary)">${displayName}</span></div>
+          <button class="updm-close" onclick="document.getElementById('user-pred-modal').remove()">✕ Cerrar</button>
         </div>
-        <div id="user-pred-content" style="padding:16px">
-          <div style="text-align:center;color:var(--color-text-muted);padding:2rem">Cargando...</div>
+        <div class="updm-body" id="user-pred-content">
+          <div style="text-align:center;color:var(--color-text-muted);padding:2rem">Cargando pronósticos...</div>
         </div>
       </div>`;
     document.body.appendChild(modal);
@@ -830,86 +881,149 @@ const app = {
 
     const container = document.getElementById('user-pred-content');
     try {
-      const [classified, freshPreds, podiumData] = await Promise.all([
+      const [classified, otherPredsArr, podiumData] = await Promise.all([
         this.api(`/predictions/classified?userId=${userId}`),
         this.api(`/predictions?userId=${userId}`),
         this.api(`/podium?userId=${userId}`).catch(() => null)
       ]);
 
-      const myPreds = this.predictions;
-      this.predictions = Object.fromEntries(freshPreds.map(p => [p.match_id, p]));
+      // Mapa LOCAL — nunca tocamos this.predictions
+      const upreds = Object.fromEntries(otherPredsArr.map(p => [p.match_id, p]));
 
       const groupColors = { A:'#1a5c8a',B:'#6b21a8',C:'#166534',D:'#991b1b',E:'#0f766e',F:'#92400e',G:'#5b21b6',H:'#1e40af',I:'#9d174d',J:'#065f46',K:'#7c2d12',L:'#164e63' };
       const groupMatches = this.matches.filter(m => m.phase === 'groups');
-      const filledGroup = groupMatches.filter(m => this.predictions[m.id] && this.predictions[m.id].pred_home != null).length;
+      const filledGroup = groupMatches.filter(m => upreds[m.id] && upreds[m.id].pred_home != null).length;
 
       if (filledGroup === 0) {
-        container.innerHTML = `<div style="text-align:center;padding:2rem;color:var(--color-text-muted)">Este usuario aún no tiene pronósticos registrados.</div>`;
-        this.predictions = myPreds;
+        container.innerHTML = `<div style="text-align:center;padding:2rem;color:var(--color-text-muted)">📝 ${displayName} aún no tiene pronósticos registrados.</div>`;
         return;
       }
 
       const matchesByGroup = {};
-      groupMatches.forEach(m => { if (!matchesByGroup[m.group_name]) matchesByGroup[m.group_name] = []; matchesByGroup[m.group_name].push(m); });
+      groupMatches.forEach(m => { (matchesByGroup[m.group_name] = matchesByGroup[m.group_name] || []).push(m); });
 
       const groupsHtml = Object.keys(classified.groups).sort().map(g => {
         const standings = classified.groups[g];
         const color = groupColors[g] || '#C9A84C';
-        const gMatches = matchesByGroup[g] || [];
-        const matchesHtml = gMatches.map(m => {
-          const pred = this.predictions[m.id];
+        const rows = (matchesByGroup[g] || []).map(m => {
+          const p = upreds[m.id];
           const home = this.teamByCode(m.home_team);
           const away = this.teamByCode(m.away_team);
-          const ph = pred ? pred.pred_home : null;
-          const pa = pred ? pred.pred_away : null;
-          const hasPred = ph != null && pa != null;
-          return `<div style="display:flex;align-items:center;gap:4px;font-size:11px;padding:2px 0;${!hasPred?'opacity:0.4':''}">
-            <span style="flex:1;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${home.flag} ${home.name}</span>
-            <span style="font-weight:700;min-width:32px;text-align:center;background:var(--color-background-secondary);border-radius:4px;padding:1px 4px">${hasPred?ph+'-'+pa:'–'}</span>
-            <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${away.flag} ${away.name}</span>
+          const has = p && p.pred_home != null && p.pred_away != null;
+          return `<div class="updm-mrow"${has?'':' style="opacity:0.4"'}>
+            <span class="l">${home.flag} ${home.name}</span>
+            <span class="s">${has ? p.pred_home + '-' + p.pred_away : '–'}</span>
+            <span class="r">${away.flag} ${away.name}</span>
           </div>`;
         }).join('');
-        return `<div class="fixture-group-card" style="border-left:3px solid ${color}">
-          <div class="fixture-group-title" style="color:${color}">Grupo ${g}</div>
-          <table class="fixture-group-table">
+        return `<div class="updm-card" style="border-left:3px solid ${color}">
+          <div class="updm-gtitle" style="color:${color}">Grupo ${g}</div>
+          <table class="updm-t">
             <thead><tr><th></th><th>Equipo</th><th>PJ</th><th>Pts</th><th>GD</th></tr></thead>
-            <tbody>${standings.map((t,i)=>`<tr><td style="font-size:11px;color:var(--color-text-muted)">${i+1}</td><td><span style="margin-right:4px">${t.team_info.flag}</span>${t.team_info.name}</td><td style="text-align:center">${t.played}</td><td style="text-align:center;font-weight:${t.classified?'700':'400'}">${t.pts}</td><td style="text-align:center">${t.gd>0?'+':''}${t.gd}</td></tr>`).join('')}</tbody>
+            <tbody>${standings.map((t,i)=>`<tr>
+              <td style="font-size:11px;color:var(--color-text-muted)">${i+1}</td>
+              <td><span style="margin-right:4px">${t.team_info.flag}</span>${t.team_info.name}</td>
+              <td style="text-align:center">${t.played}</td>
+              <td style="text-align:center;font-weight:${t.classified?'700':'400'}">${t.pts}</td>
+              <td style="text-align:center">${t.gd>0?'+':''}${t.gd}</td>
+            </tr>`).join('')}</tbody>
           </table>
-          <div style="margin-top:8px;padding-top:6px;border-top:1px solid var(--color-border)">
-            <div style="font-size:10px;font-weight:600;color:var(--color-text-muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px">Marcadores</div>
-            ${matchesHtml}
+          <div class="updm-scores">
+            <div class="updm-scores-title">Marcadores</div>
+            ${rows}
           </div>
         </div>`;
       }).join('');
 
+      const best8Html = (classified.best8Thirds && classified.best8Thirds.length) ? `
+        <div class="updm-card" style="margin-top:10px">
+          <div class="updm-gtitle" style="color:var(--color-primary)">Sus 8 mejores terceros</div>
+          <div class="updm-chips">${classified.best8Thirds.map(t=>`<span class="updm-chip">${t.flag} ${t.name}</span>`).join('')}</div>
+        </div>` : '';
+
+      // ── Bracket: equipos reales + cascada con los pronósticos de ESTE usuario ──
       const matchesById = {};
       this.matches.forEach(m => { matchesById[m.id] = m; });
-      const QF2 = {'QF-1':['R32-2','R32-6'],'QF-2':['R32-1','R32-3'],'QF-3':['R32-4','R32-5'],'QF-4':['R32-7','R32-8'],'QF-5':['R32-11','R32-12'],'QF-6':['R32-9','R32-10'],'QF-7':['R32-15','R32-14'],'QF-8':['R32-13','R32-16']};
-      const SF2 = {'SF-1':['QF-1','QF-2'],'SF-2':['QF-3','QF-4'],'SF-3':['QF-5','QF-6'],'SF-4':['QF-7','QF-8'],'SF-5':['SF-1','SF-2'],'SF-6':['SF-3','SF-4']};
-      const res2 = {};
-      const win2 = (id,h,a) => { const p=this.predictions[id]; if(!p) return null; const ph=p.pred_home!=null?parseInt(p.pred_home):null,pa2=p.pred_away!=null?parseInt(p.pred_away):null; if(ph!=null&&pa2!=null&&ph!==pa2) return ph>pa2?h:a; return p.pred_winner||null; };
-      const rm2 = (id) => { if(res2[id]) return res2[id]; let h=null,a=null; if(id.startsWith('R32')){const m=matchesById[id];h=m?.home_team||null;a=m?.away_team||null;} else if(QF2[id]){const[x,y]=QF2[id];const rx=rm2(x),ry=rm2(y);h=win2(x,rx.h,rx.a);a=win2(y,ry.h,ry.a);} else if(SF2[id]){const[x,y]=SF2[id];const rx=rm2(x),ry=rm2(y);h=win2(x,rx.h,rx.a);a=win2(y,ry.h,ry.a);} else if(id==='FINAL'){const rx=rm2('SF-5'),ry=rm2('SF-6');h=win2('SF-5',rx.h,rx.a);a=win2('SF-6',ry.h,ry.a);} else if(id==='TP'){const rx=rm2('SF-5'),ry=rm2('SF-6');const w5=win2('SF-5',rx.h,rx.a),w6=win2('SF-6',ry.h,ry.a);h=w5?(w5===rx.h?rx.a:rx.h):null;a=w6?(w6===ry.h?ry.a:ry.h):null;} res2[id]={h,a};return res2[id]; };
-      const mc2 = (id) => { const {h,a}=rm2(id); const ht=h?this.teamByCode(h):null,at=a?this.teamByCode(a):null; const p=this.predictions[id]; const hasPred=!!(p&&(p.pred_home!=null||p.pred_winner!=null)); const pw=h&&a?win2(id,h,a):null; const ss=p&&p.pred_home!=null; const pH=p&&p.pred_pen_home!=null?`(${p.pred_pen_home})`:''; const pA=p&&p.pred_pen_away!=null?`(${p.pred_pen_away})`:''; if(!ht&&!at) return `<div class="bk-match empty"><div class="bk-team"><span class="bk-name" style="opacity:0.5">Por definir</span></div><div class="bk-team"><span class="bk-name" style="opacity:0.5">Por definir</span></div></div>`; return `<div class="bk-match${hasPred?' played':''}"><div class="bk-team ${pw&&ht&&pw===ht.code?'winner':pw&&ht?'loser':''}"><span class="bk-flag">${ht?.flag||'?'}</span><span class="bk-name">${ht?.name||'?'}</span>${ss?`<span class="bk-score">${p.pred_home}${pH}</span>`:''}</div><div class="bk-team ${pw&&at&&pw===at.code?'winner':pw&&at?'loser':''}"><span class="bk-flag">${at?.flag||'?'}</span><span class="bk-name">${at?.name||'?'}</span>${ss?`<span class="bk-score">${p.pred_away}${pA}</span>`:''}</div></div>`; };
-      const col2 = (ids,label) => `<div class="pw-col"><div class="pw-col-label">${label}</div><div class="pw-col-matches">${ids.map(id=>mc2(id)).join('')}</div></div>`;
-      const bracketHtml = `<div class="pw-bracket"><div class="pw-side pw-left">${col2(['R32-1','R32-2','R32-3','R32-4','R32-5','R32-6','R32-7','R32-8'],'Dieciseisavos')}${col2(['QF-1','QF-2','QF-3','QF-4'],'Octavos')}${col2(['SF-1','SF-2'],'Cuartos')}${col2(['SF-5'],'Semis')}</div><div class="pw-center"><div class="pw-center-label">Gran Final</div>${mc2('FINAL')}<div class="pw-center-label" style="margin-top:16px">3er Puesto</div>${mc2('TP')}</div><div class="pw-side pw-right">${col2(['SF-6'],'Semis')}${col2(['SF-3','SF-4'],'Cuartos')}${col2(['QF-5','QF-6','QF-7','QF-8'],'Octavos')}${col2(['R32-9','R32-10','R32-11','R32-12','R32-13','R32-14','R32-15','R32-16'],'Dieciseisavos')}</div></div>`;
+      const QF = {'QF-1':['R32-2','R32-6'],'QF-2':['R32-1','R32-3'],'QF-3':['R32-4','R32-5'],'QF-4':['R32-7','R32-8'],'QF-5':['R32-11','R32-12'],'QF-6':['R32-9','R32-10'],'QF-7':['R32-15','R32-14'],'QF-8':['R32-13','R32-16']};
+      const SF = {'SF-1':['QF-1','QF-2'],'SF-2':['QF-3','QF-4'],'SF-3':['QF-5','QF-6'],'SF-4':['QF-7','QF-8'],'SF-5':['SF-1','SF-2'],'SF-6':['SF-3','SF-4']};
+      const memo = {};
+      const winOf = (id, h, a) => {
+        const p = upreds[id];
+        if (!p) return null;
+        const ph = p.pred_home != null ? parseInt(p.pred_home) : null;
+        const pa = p.pred_away != null ? parseInt(p.pred_away) : null;
+        if (ph != null && pa != null && ph !== pa) return ph > pa ? h : a;
+        return p.pred_winner || null;
+      };
+      const resolve = (id) => {
+        if (memo[id]) return memo[id];
+        let h = null, a = null;
+        if (id.startsWith('R32')) { const m = matchesById[id]; h = m?.home_team || null; a = m?.away_team || null; }
+        else if (QF[id]) { const [x,y]=QF[id]; const rx=resolve(x), ry=resolve(y); h=winOf(x,rx.h,rx.a); a=winOf(y,ry.h,ry.a); }
+        else if (SF[id]) { const [x,y]=SF[id]; const rx=resolve(x), ry=resolve(y); h=winOf(x,rx.h,rx.a); a=winOf(y,ry.h,ry.a); }
+        else if (id === 'FINAL') { const rx=resolve('SF-5'), ry=resolve('SF-6'); h=winOf('SF-5',rx.h,rx.a); a=winOf('SF-6',ry.h,ry.a); }
+        else if (id === 'TP') { const rx=resolve('SF-5'), ry=resolve('SF-6'); const w5=winOf('SF-5',rx.h,rx.a), w6=winOf('SF-6',ry.h,ry.a); h=w5?(w5===rx.h?rx.a:rx.h):null; a=w6?(w6===ry.h?ry.a:ry.h):null; }
+        memo[id] = { h, a };
+        return memo[id];
+      };
+      const card = (id) => {
+        const { h, a } = resolve(id);
+        const ht = h ? this.teamByCode(h) : null;
+        const at = a ? this.teamByCode(a) : null;
+        const p = upreds[id];
+        const has = !!(p && (p.pred_home != null || p.pred_winner != null));
+        const pw = (h && a) ? winOf(id, h, a) : null;
+        const ss = p && p.pred_home != null;
+        const pH = p && p.pred_pen_home != null ? `(${p.pred_pen_home})` : '';
+        const pA = p && p.pred_pen_away != null ? `(${p.pred_pen_away})` : '';
+        if (!ht && !at) return `<div class="updm-bk empty">Por definir</div>`;
+        return `<div class="updm-bk${has ? ' played' : ''}">
+          <div class="updm-team ${pw&&ht&&pw===ht.code?'winner':pw&&ht?'loser':''}">
+            <span class="updm-flag">${ht?.flag||'?'}</span><span class="updm-name">${ht?.name||'Por definir'}</span>${ss?`<span class="updm-score">${p.pred_home}${pH}</span>`:''}
+          </div>
+          <div class="updm-team ${pw&&at&&pw===at.code?'winner':pw&&at?'loser':''}">
+            <span class="updm-flag">${at?.flag||'?'}</span><span class="updm-name">${at?.name||'Por definir'}</span>${ss?`<span class="updm-score">${p.pred_away}${pA}</span>`:''}
+          </div>
+        </div>`;
+      };
+      const col = (ids, label) => `<div class="updm-col"><div class="updm-clabel">${label}</div><div class="updm-cmatches">${ids.map(card).join('')}</div></div>`;
+      const bracketHtml = `<div class="updm-bracket">
+        <div class="updm-side">${col(['R32-1','R32-2','R32-3','R32-4','R32-5','R32-6','R32-7','R32-8'],'Dieciseisavos')}${col(['QF-1','QF-2','QF-3','QF-4'],'Octavos')}${col(['SF-1','SF-2'],'Cuartos')}${col(['SF-5'],'Semis')}</div>
+        <div class="updm-center"><div class="updm-clabel">Gran Final</div>${card('FINAL')}<div class="updm-clabel" style="margin-top:16px">3er Puesto</div>${card('TP')}</div>
+        <div class="updm-side updm-right">${col(['SF-6'],'Semis')}${col(['SF-3','SF-4'],'Cuartos')}${col(['QF-5','QF-6','QF-7','QF-8'],'Octavos')}${col(['R32-9','R32-10','R32-11','R32-12','R32-13','R32-14','R32-15','R32-16'],'Dieciseisavos')}</div>
+      </div>`;
+
+      // Si la Polla 2 sigue abierta, el servidor oculta los picks de eliminatorias de otros
+      const koNote = (!this.user.is_admin && this.lockStatus && !this.lockStatus.polla2Locked)
+        ? `<div class="updm-note">🔒 Los pronósticos de eliminatorias de otros participantes serán visibles cuando cierre la Polla 2.</div>` : '';
 
       let podiumHtml = '';
       if (podiumData?.first_place) {
-        const t1=this.teamByCode(podiumData.first_place),t2=podiumData.second_place?this.teamByCode(podiumData.second_place):null,t3=podiumData.third_place?this.teamByCode(podiumData.third_place):null;
-        podiumHtml = `<div style="margin:12px 0;padding:10px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius-md)"><div style="font-size:11px;font-weight:700;color:var(--color-primary);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Podio pronosticado</div><div style="display:flex;justify-content:center;gap:16px;flex-wrap:wrap"><div style="text-align:center"><div style="font-size:22px">🥇</div><div style="font-size:13px;font-weight:700">${t1.flag} ${t1.name}</div></div>${t2?`<div style="text-align:center"><div style="font-size:22px">🥈</div><div style="font-size:13px">${t2.flag} ${t2.name}</div></div>`:''} ${t3?`<div style="text-align:center"><div style="font-size:22px">🥉</div><div style="font-size:13px">${t3.flag} ${t3.name}</div></div>`:''}</div></div>`;
+        const t1 = this.teamByCode(podiumData.first_place);
+        const t2 = podiumData.second_place ? this.teamByCode(podiumData.second_place) : null;
+        const t3 = podiumData.third_place ? this.teamByCode(podiumData.third_place) : null;
+        podiumHtml = `<div class="updm-podium">
+          <div class="updm-gtitle" style="color:var(--color-primary)">Podio pronosticado</div>
+          <div style="display:flex;justify-content:center;gap:18px;flex-wrap:wrap">
+            <div style="text-align:center"><div style="font-size:22px">🥇</div><div style="font-size:13px;font-weight:700">${t1.flag} ${t1.name}</div></div>
+            ${t2?`<div style="text-align:center"><div style="font-size:22px">🥈</div><div style="font-size:13px">${t2.flag} ${t2.name}</div></div>`:''}
+            ${t3?`<div style="text-align:center"><div style="font-size:22px">🥉</div><div style="font-size:13px">${t3.flag} ${t3.name}</div></div>`:''}
+          </div>
+        </div>`;
       }
 
-      this.predictions = myPreds;
       container.innerHTML = `
-        <h3 style="font-size:14px;color:var(--color-primary);margin:0 0 10px">Fase de Grupos</h3>
-        <div class="fixture-groups-grid">${groupsHtml}</div>
-        <h3 style="font-size:14px;color:var(--color-primary);margin:20px 0 8px">Eliminatorias</h3>
-        <div class="pw-scroll-hint">← Desliza para ver el bracket →</div>
-        <div class="pw-bracket-wrapper">${bracketHtml}</div>
+        <div class="updm-summary"><strong style="color:var(--color-primary)">📊</strong> Grupos: <strong>${filledGroup}/${groupMatches.length}</strong> partidos pronosticados</div>
+        <h3 class="updm-h">Fase de Grupos</h3>
+        <div class="updm-grid">${groupsHtml}</div>
+        ${best8Html}
+        <h3 class="updm-h">Eliminatorias</h3>
+        <div class="updm-hint">← Desliza horizontalmente para ver el bracket →</div>
+        <div class="updm-bwrap">${bracketHtml}</div>
+        ${koNote}
         ${podiumHtml}`;
-    } catch(e) {
-      this.predictions = this.predictions || {};
-      container.innerHTML = `<div style="color:var(--color-danger);padding:1rem">Error al cargar: ${e.message}</div>`;
+    } catch (e) {
+      container.innerHTML = `<div style="text-align:center;color:var(--color-danger);padding:1.5rem">⚠️ ${e.message}</div>`;
     }
   },
 
@@ -1707,8 +1821,9 @@ const app = {
             <div class="metric-card"><div class="metric-label">🥈 Premio 2do <small style="font-size:10px">(${sp.second}%)</small></div><div class="metric-value">$${prizes.second.toFixed(2)}</div></div>
             <div class="metric-card"><div class="metric-label">🥉 Premio 3ro <small style="font-size:10px">(${sp.third}%)</small></div><div class="metric-value">$${prizes.third.toFixed(2)}</div></div>
           </div>
+          <div style="overflow-x:auto">
           <table class="leaderboard-table">
-            <thead><tr><th>#</th><th>Participante</th><th style="text-align:center">Aciertos</th><th style="text-align:center">Exactos</th><th style="text-align:right">Puntos</th><th></th></tr></thead>
+            <thead><tr><th>#</th><th>Participante</th><th style="text-align:center">Aciertos</th><th style="text-align:center">Exactos</th><th style="text-align:right">Puntos</th></tr></thead>
             <tbody>
               ${leaderboard.map((u, i) => {
                 const rank = i + 1;
@@ -1716,17 +1831,19 @@ const app = {
                 const init = u.display_name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
                 const isMe = u.user_id === this.user.id || u.id === this.user.id;
                 const uid = u.user_id || u.id;
+                this._lbNames = this._lbNames || {};
+                this._lbNames[uid] = u.display_name;
                 return `<tr style="${isMe ? 'background:rgba(201,168,76,0.06)' : ''}">
                   <td><span class="rank-medal ${medal}">${rank}</span></td>
-                  <td class="user-cell"><span class="avatar">${init}</span><span>${u.display_name}${isMe ? ' <strong>(tú)</strong>' : ''}</span></td>
+                  <td class="user-cell"><span class="avatar">${init}</span><span>${u.display_name}${isMe ? ' <strong>(tú)</strong>' : ''}</span><button title="Ver pronósticos" onclick="app.showUserPredictions(${uid})" style="margin-left:8px;font-size:12px;padding:2px 8px;border:1px solid var(--color-border);border-radius:6px;background:transparent;color:var(--color-text-muted);cursor:pointer;flex-shrink:0">👁 Ver</button></td>
                   <td style="text-align:center">${u.correctPredictions ?? u.correct ?? 0}</td>
                   <td style="text-align:center">${u.exactScores ?? u.exact ?? 0}</td>
                   <td style="text-align:right;font-weight:700">${u.points}</td>
-                  <td style="text-align:right"><button class="btn-sm btn-ghost" onclick="app.showUserPredictions(${uid},'${u.display_name.replace(/'/g,'\\\'')}')" style="font-size:11px;padding:3px 8px">👁 Ver</button></td>
                 </tr>`;
               }).join('')}
             </tbody>
-          </table>`;
+          </table>
+          </div>`;
       };
 
       main.innerHTML = `
