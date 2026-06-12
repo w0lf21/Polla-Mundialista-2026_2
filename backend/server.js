@@ -373,9 +373,34 @@ app.get('/api/predictions/lock-status', (req, res) => {
 // ─── PREDICCIONES ─────────────────────────────────────────────────────────────
 
 app.get('/api/predictions', authMiddleware, (req, res) => {
-  // Si se pasa ?userId= y el usuario es admin, devuelve predicciones de ese usuario
-  const targetId = req.query.userId && req.user.is_admin ? parseInt(req.query.userId) : req.user.id;
-  res.json(db.prepare('SELECT * FROM predictions WHERE user_id = ?').all(targetId));
+  const requestedId = req.query.userId ? parseInt(req.query.userId) : null;
+
+  // Sin userId o pidiendo las propias → devolver las del usuario autenticado
+  if (!requestedId || requestedId === req.user.id) {
+    return res.json(db.prepare('SELECT * FROM predictions WHERE user_id = ?').all(req.user.id));
+  }
+
+  // Ver pronósticos de OTRO participante (transparencia):
+  // - Admin: siempre puede ver todo
+  // - Usuarios: solo las fases cuya polla ya está cerrada (para que nadie copie picks)
+  if (req.user.is_admin) {
+    return res.json(db.prepare('SELECT * FROM predictions WHERE user_id = ?').all(requestedId));
+  }
+
+  const p1 = arePolla1Locked();
+  const p2 = arePolla2Locked();
+  if (!p1 && !p2) {
+    return res.status(403).json({ error: 'Los pronósticos de otros participantes serán visibles cuando la polla cierre.' });
+  }
+  const conds = [];
+  if (p1) conds.push("m.phase = 'groups'");
+  if (p2) conds.push("m.phase != 'groups'");
+  const rows = db.prepare(`
+    SELECT p.* FROM predictions p
+    JOIN matches m ON m.id = p.match_id
+    WHERE p.user_id = ? AND (${conds.join(' OR ')})
+  `).all(requestedId);
+  res.json(rows);
 });
 
 app.post('/api/predictions', authMiddleware, (req, res) => {
@@ -443,8 +468,14 @@ app.post('/api/predictions/batch', authMiddleware, (req, res) => {
 
 app.get('/api/predictions/classified', authMiddleware, (req, res) => {
   try {
-    const targetId = req.query.userId && req.user.is_admin ? parseInt(req.query.userId) : req.user.id;
-  const data = calcUserClassified(db, targetId);
+    const requestedId = req.query.userId ? parseInt(req.query.userId) : null;
+    let targetId = req.user.id;
+    if (requestedId && requestedId !== req.user.id) {
+      if (!req.user.is_admin && !arePolla1Locked())
+        return res.status(403).json({ error: 'Visible cuando la polla de grupos cierre.' });
+      targetId = requestedId;
+    }
+    const data = calcUserClassified(db, targetId);
     const teamMap = Object.fromEntries(db.prepare('SELECT * FROM teams').all().map(t => [t.code, t]));
     const enriched = {};
     for (const [group, standings] of Object.entries(data.groups)) {
@@ -482,7 +513,13 @@ app.get('/api/predictions/ko-teams', authMiddleware, (req, res) => {
 // ─── PODIO ────────────────────────────────────────────────────────────────────
 
 app.get('/api/podium', authMiddleware, (req, res) => {
-  const podiumTargetId = req.query.userId && req.user.is_admin ? parseInt(req.query.userId) : req.user.id;
+  const requestedId = req.query.userId ? parseInt(req.query.userId) : null;
+  let podiumTargetId = req.user.id;
+  if (requestedId && requestedId !== req.user.id) {
+    if (!req.user.is_admin && !arePolla1Locked())
+      return res.status(403).json({ error: 'Visible cuando la polla de grupos cierre.' });
+    podiumTargetId = requestedId;
+  }
   res.json(db.prepare('SELECT * FROM podium_predictions WHERE user_id = ?').get(podiumTargetId) ||
     { user_id: podiumTargetId, first_place: null, second_place: null, third_place: null });
 });
