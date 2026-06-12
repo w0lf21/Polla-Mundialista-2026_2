@@ -33,7 +33,13 @@ function matchStartUTC(matchDate, matchTime) {
 }
 
 // Polla 1 — se bloquea 5 min antes del primer partido de grupos
+// O cuando el admin activa el bloqueo manual (manual_lock_polla1 = '1')
 function arePolla1Locked() {
+  // Override manual del admin
+  const manual = db.prepare("SELECT value FROM settings WHERE key = 'manual_lock_polla1'").get();
+  if (manual?.value === '1') return true;
+  if (manual?.value === '0') return false; // admin desbloqueó explícitamente
+
   const first = db.prepare(`
     SELECT match_date, match_time FROM matches
     WHERE phase = 'groups' AND match_date IS NOT NULL AND match_time IS NOT NULL
@@ -46,7 +52,13 @@ function arePolla1Locked() {
 }
 
 // Polla 2 — se bloquea 5 min antes del primer partido de dieciseisavos (r16)
+// O cuando el admin activa el bloqueo manual (manual_lock_polla2 = '1')
 function arePolla2Locked() {
+  // Override manual del admin
+  const manual = db.prepare("SELECT value FROM settings WHERE key = 'manual_lock_polla2'").get();
+  if (manual?.value === '1') return true;
+  if (manual?.value === '0') return false;
+
   const first = db.prepare(`
     SELECT match_date, match_time FROM matches
     WHERE phase = 'r16' AND match_date IS NOT NULL AND match_time IS NOT NULL
@@ -361,7 +373,9 @@ app.get('/api/predictions/lock-status', (req, res) => {
 // ─── PREDICCIONES ─────────────────────────────────────────────────────────────
 
 app.get('/api/predictions', authMiddleware, (req, res) => {
-  res.json(db.prepare('SELECT * FROM predictions WHERE user_id = ?').all(req.user.id));
+  // Si se pasa ?userId= y el usuario es admin, devuelve predicciones de ese usuario
+  const targetId = req.query.userId && req.user.is_admin ? parseInt(req.query.userId) : req.user.id;
+  res.json(db.prepare('SELECT * FROM predictions WHERE user_id = ?').all(targetId));
 });
 
 app.post('/api/predictions', authMiddleware, (req, res) => {
@@ -429,7 +443,8 @@ app.post('/api/predictions/batch', authMiddleware, (req, res) => {
 
 app.get('/api/predictions/classified', authMiddleware, (req, res) => {
   try {
-    const data = calcUserClassified(db, req.user.id);
+    const targetId = req.query.userId && req.user.is_admin ? parseInt(req.query.userId) : req.user.id;
+  const data = calcUserClassified(db, targetId);
     const teamMap = Object.fromEntries(db.prepare('SELECT * FROM teams').all().map(t => [t.code, t]));
     const enriched = {};
     for (const [group, standings] of Object.entries(data.groups)) {
@@ -447,7 +462,8 @@ app.get('/api/predictions/classified', authMiddleware, (req, res) => {
 
 app.get('/api/predictions/ko-teams', authMiddleware, (req, res) => {
   try {
-    const data = calcUserClassified(db, req.user.id);
+    const targetId = req.query.userId && req.user.is_admin ? parseInt(req.query.userId) : req.user.id;
+  const data = calcUserClassified(db, targetId);
     const teamMap = Object.fromEntries(db.prepare('SELECT * FROM teams').all().map(t => [t.code, t]));
     const enriched = {};
     for (const [matchId, teams] of Object.entries(data.matchTeams)) {
@@ -466,8 +482,9 @@ app.get('/api/predictions/ko-teams', authMiddleware, (req, res) => {
 // ─── PODIO ────────────────────────────────────────────────────────────────────
 
 app.get('/api/podium', authMiddleware, (req, res) => {
-  res.json(db.prepare('SELECT * FROM podium_predictions WHERE user_id = ?').get(req.user.id) ||
-    { user_id: req.user.id, first_place: null, second_place: null, third_place: null });
+  const podiumTargetId = req.query.userId && req.user.is_admin ? parseInt(req.query.userId) : req.user.id;
+  res.json(db.prepare('SELECT * FROM podium_predictions WHERE user_id = ?').get(podiumTargetId) ||
+    { user_id: podiumTargetId, first_place: null, second_place: null, third_place: null });
 });
 
 app.post('/api/podium', authMiddleware, (req, res) => {
@@ -685,6 +702,23 @@ app.put('/api/admin/pollas/settings', authMiddleware, adminMiddleware, (req, res
     if (val != null) db.prepare('UPDATE settings SET value = ? WHERE key = ?').run(String(val), key);
   }
   res.json({ success: true });
+});
+
+// Admin — control manual de bloqueo de pollas
+// action: 'lock' | 'unlock' | 'auto' (vuelve al comportamiento automático por tiempo)
+app.put('/api/admin/pollas/:polla/lock', authMiddleware, adminMiddleware, (req, res) => {
+  const { polla } = req.params; // 'polla1' | 'polla2'
+  const { action } = req.body || {};
+  if (!['polla1','polla2'].includes(polla)) return res.status(400).json({ error: 'Polla inválida' });
+  if (!['lock','unlock','auto'].includes(action)) return res.status(400).json({ error: 'Acción inválida' });
+
+  const key = `manual_lock_${polla}`;
+  if (action === 'auto') {
+    db.prepare('DELETE FROM settings WHERE key = ?').run(key);
+  } else {
+    db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(key, action === 'lock' ? '1' : '0');
+  }
+  res.json({ success: true, polla, action, locked: arePolla1Locked(), polla2Locked: arePolla2Locked() });
 });
 
 // ─── APUESTAS DIARIAS ─────────────────────────────────────────────────────────
