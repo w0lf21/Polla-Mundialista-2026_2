@@ -809,6 +809,110 @@ const app = {
     }
   },
 
+  // ── VER PRONÓSTICOS DE OTRO USUARIO ────────────────────────────────────────
+
+  async showUserPredictions(userId, displayName) {
+    const modal = document.createElement('div');
+    modal.id = 'user-pred-modal';
+    modal.style.cssText = 'position:fixed;inset:0;z-index:8000;background:rgba(0,0,0,0.85);overflow-y:auto;padding:16px';
+    modal.innerHTML = `
+      <div style="max-width:900px;margin:0 auto;background:var(--color-surface);border-radius:var(--radius-lg);overflow:hidden">
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 18px;background:var(--color-background-secondary);border-bottom:1px solid var(--color-border)">
+          <div style="font-weight:700;font-size:15px">👁 Pronósticos de <span style="color:var(--color-primary)">${displayName}</span></div>
+          <button onclick="document.getElementById('user-pred-modal').remove()" style="background:transparent;border:none;color:var(--color-text-muted);font-size:20px;cursor:pointer;line-height:1">✕</button>
+        </div>
+        <div id="user-pred-content" style="padding:16px">
+          <div style="text-align:center;color:var(--color-text-muted);padding:2rem">Cargando...</div>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+    modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+
+    const container = document.getElementById('user-pred-content');
+    try {
+      const [classified, freshPreds, podiumData] = await Promise.all([
+        this.api(`/predictions/classified?userId=${userId}`),
+        this.api(`/predictions?userId=${userId}`),
+        this.api(`/podium?userId=${userId}`).catch(() => null)
+      ]);
+
+      const myPreds = this.predictions;
+      this.predictions = Object.fromEntries(freshPreds.map(p => [p.match_id, p]));
+
+      const groupColors = { A:'#1a5c8a',B:'#6b21a8',C:'#166534',D:'#991b1b',E:'#0f766e',F:'#92400e',G:'#5b21b6',H:'#1e40af',I:'#9d174d',J:'#065f46',K:'#7c2d12',L:'#164e63' };
+      const groupMatches = this.matches.filter(m => m.phase === 'groups');
+      const filledGroup = groupMatches.filter(m => this.predictions[m.id] && this.predictions[m.id].pred_home != null).length;
+
+      if (filledGroup === 0) {
+        container.innerHTML = `<div style="text-align:center;padding:2rem;color:var(--color-text-muted)">Este usuario aún no tiene pronósticos registrados.</div>`;
+        this.predictions = myPreds;
+        return;
+      }
+
+      const matchesByGroup = {};
+      groupMatches.forEach(m => { if (!matchesByGroup[m.group_name]) matchesByGroup[m.group_name] = []; matchesByGroup[m.group_name].push(m); });
+
+      const groupsHtml = Object.keys(classified.groups).sort().map(g => {
+        const standings = classified.groups[g];
+        const color = groupColors[g] || '#C9A84C';
+        const gMatches = matchesByGroup[g] || [];
+        const matchesHtml = gMatches.map(m => {
+          const pred = this.predictions[m.id];
+          const home = this.teamByCode(m.home_team);
+          const away = this.teamByCode(m.away_team);
+          const ph = pred ? pred.pred_home : null;
+          const pa = pred ? pred.pred_away : null;
+          const hasPred = ph != null && pa != null;
+          return `<div style="display:flex;align-items:center;gap:4px;font-size:11px;padding:2px 0;${!hasPred?'opacity:0.4':''}">
+            <span style="flex:1;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${home.flag} ${home.name}</span>
+            <span style="font-weight:700;min-width:32px;text-align:center;background:var(--color-background-secondary);border-radius:4px;padding:1px 4px">${hasPred?ph+'-'+pa:'–'}</span>
+            <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${away.flag} ${away.name}</span>
+          </div>`;
+        }).join('');
+        return `<div class="fixture-group-card" style="border-left:3px solid ${color}">
+          <div class="fixture-group-title" style="color:${color}">Grupo ${g}</div>
+          <table class="fixture-group-table">
+            <thead><tr><th></th><th>Equipo</th><th>PJ</th><th>Pts</th><th>GD</th></tr></thead>
+            <tbody>${standings.map((t,i)=>`<tr><td style="font-size:11px;color:var(--color-text-muted)">${i+1}</td><td><span style="margin-right:4px">${t.team_info.flag}</span>${t.team_info.name}</td><td style="text-align:center">${t.played}</td><td style="text-align:center;font-weight:${t.classified?'700':'400'}">${t.pts}</td><td style="text-align:center">${t.gd>0?'+':''}${t.gd}</td></tr>`).join('')}</tbody>
+          </table>
+          <div style="margin-top:8px;padding-top:6px;border-top:1px solid var(--color-border)">
+            <div style="font-size:10px;font-weight:600;color:var(--color-text-muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px">Marcadores</div>
+            ${matchesHtml}
+          </div>
+        </div>`;
+      }).join('');
+
+      const matchesById = {};
+      this.matches.forEach(m => { matchesById[m.id] = m; });
+      const QF2 = {'QF-1':['R32-2','R32-6'],'QF-2':['R32-1','R32-3'],'QF-3':['R32-4','R32-5'],'QF-4':['R32-7','R32-8'],'QF-5':['R32-11','R32-12'],'QF-6':['R32-9','R32-10'],'QF-7':['R32-15','R32-14'],'QF-8':['R32-13','R32-16']};
+      const SF2 = {'SF-1':['QF-1','QF-2'],'SF-2':['QF-3','QF-4'],'SF-3':['QF-5','QF-6'],'SF-4':['QF-7','QF-8'],'SF-5':['SF-1','SF-2'],'SF-6':['SF-3','SF-4']};
+      const res2 = {};
+      const win2 = (id,h,a) => { const p=this.predictions[id]; if(!p) return null; const ph=p.pred_home!=null?parseInt(p.pred_home):null,pa2=p.pred_away!=null?parseInt(p.pred_away):null; if(ph!=null&&pa2!=null&&ph!==pa2) return ph>pa2?h:a; return p.pred_winner||null; };
+      const rm2 = (id) => { if(res2[id]) return res2[id]; let h=null,a=null; if(id.startsWith('R32')){const m=matchesById[id];h=m?.home_team||null;a=m?.away_team||null;} else if(QF2[id]){const[x,y]=QF2[id];const rx=rm2(x),ry=rm2(y);h=win2(x,rx.h,rx.a);a=win2(y,ry.h,ry.a);} else if(SF2[id]){const[x,y]=SF2[id];const rx=rm2(x),ry=rm2(y);h=win2(x,rx.h,rx.a);a=win2(y,ry.h,ry.a);} else if(id==='FINAL'){const rx=rm2('SF-5'),ry=rm2('SF-6');h=win2('SF-5',rx.h,rx.a);a=win2('SF-6',ry.h,ry.a);} else if(id==='TP'){const rx=rm2('SF-5'),ry=rm2('SF-6');const w5=win2('SF-5',rx.h,rx.a),w6=win2('SF-6',ry.h,ry.a);h=w5?(w5===rx.h?rx.a:rx.h):null;a=w6?(w6===ry.h?ry.a:ry.h):null;} res2[id]={h,a};return res2[id]; };
+      const mc2 = (id) => { const {h,a}=rm2(id); const ht=h?this.teamByCode(h):null,at=a?this.teamByCode(a):null; const p=this.predictions[id]; const hasPred=!!(p&&(p.pred_home!=null||p.pred_winner!=null)); const pw=h&&a?win2(id,h,a):null; const ss=p&&p.pred_home!=null; const pH=p&&p.pred_pen_home!=null?`(${p.pred_pen_home})`:''; const pA=p&&p.pred_pen_away!=null?`(${p.pred_pen_away})`:''; if(!ht&&!at) return `<div class="bk-match empty"><div class="bk-team"><span class="bk-name" style="opacity:0.5">Por definir</span></div><div class="bk-team"><span class="bk-name" style="opacity:0.5">Por definir</span></div></div>`; return `<div class="bk-match${hasPred?' played':''}"><div class="bk-team ${pw&&ht&&pw===ht.code?'winner':pw&&ht?'loser':''}"><span class="bk-flag">${ht?.flag||'?'}</span><span class="bk-name">${ht?.name||'?'}</span>${ss?`<span class="bk-score">${p.pred_home}${pH}</span>`:''}</div><div class="bk-team ${pw&&at&&pw===at.code?'winner':pw&&at?'loser':''}"><span class="bk-flag">${at?.flag||'?'}</span><span class="bk-name">${at?.name||'?'}</span>${ss?`<span class="bk-score">${p.pred_away}${pA}</span>`:''}</div></div>`; };
+      const col2 = (ids,label) => `<div class="pw-col"><div class="pw-col-label">${label}</div><div class="pw-col-matches">${ids.map(id=>mc2(id)).join('')}</div></div>`;
+      const bracketHtml = `<div class="pw-bracket"><div class="pw-side pw-left">${col2(['R32-1','R32-2','R32-3','R32-4','R32-5','R32-6','R32-7','R32-8'],'Dieciseisavos')}${col2(['QF-1','QF-2','QF-3','QF-4'],'Octavos')}${col2(['SF-1','SF-2'],'Cuartos')}${col2(['SF-5'],'Semis')}</div><div class="pw-center"><div class="pw-center-label">Gran Final</div>${mc2('FINAL')}<div class="pw-center-label" style="margin-top:16px">3er Puesto</div>${mc2('TP')}</div><div class="pw-side pw-right">${col2(['SF-6'],'Semis')}${col2(['SF-3','SF-4'],'Cuartos')}${col2(['QF-5','QF-6','QF-7','QF-8'],'Octavos')}${col2(['R32-9','R32-10','R32-11','R32-12','R32-13','R32-14','R32-15','R32-16'],'Dieciseisavos')}</div></div>`;
+
+      let podiumHtml = '';
+      if (podiumData?.first_place) {
+        const t1=this.teamByCode(podiumData.first_place),t2=podiumData.second_place?this.teamByCode(podiumData.second_place):null,t3=podiumData.third_place?this.teamByCode(podiumData.third_place):null;
+        podiumHtml = `<div style="margin:12px 0;padding:10px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius-md)"><div style="font-size:11px;font-weight:700;color:var(--color-primary);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Podio pronosticado</div><div style="display:flex;justify-content:center;gap:16px;flex-wrap:wrap"><div style="text-align:center"><div style="font-size:22px">🥇</div><div style="font-size:13px;font-weight:700">${t1.flag} ${t1.name}</div></div>${t2?`<div style="text-align:center"><div style="font-size:22px">🥈</div><div style="font-size:13px">${t2.flag} ${t2.name}</div></div>`:''} ${t3?`<div style="text-align:center"><div style="font-size:22px">🥉</div><div style="font-size:13px">${t3.flag} ${t3.name}</div></div>`:''}</div></div>`;
+      }
+
+      this.predictions = myPreds;
+      container.innerHTML = `
+        <h3 style="font-size:14px;color:var(--color-primary);margin:0 0 10px">Fase de Grupos</h3>
+        <div class="fixture-groups-grid">${groupsHtml}</div>
+        <h3 style="font-size:14px;color:var(--color-primary);margin:20px 0 8px">Eliminatorias</h3>
+        <div class="pw-scroll-hint">← Desliza para ver el bracket →</div>
+        <div class="pw-bracket-wrapper">${bracketHtml}</div>
+        ${podiumHtml}`;
+    } catch(e) {
+      this.predictions = this.predictions || {};
+      container.innerHTML = `<div style="color:var(--color-danger);padding:1rem">Error al cargar: ${e.message}</div>`;
+    }
+  },
+
   // ── HOY ────────────────────────────────────────────────────────────────────
 
   async renderToday(main) {
@@ -1604,19 +1708,21 @@ const app = {
             <div class="metric-card"><div class="metric-label">🥉 Premio 3ro <small style="font-size:10px">(${sp.third}%)</small></div><div class="metric-value">$${prizes.third.toFixed(2)}</div></div>
           </div>
           <table class="leaderboard-table">
-            <thead><tr><th>#</th><th>Participante</th><th style="text-align:center">Aciertos</th><th style="text-align:center">Exactos</th><th style="text-align:right">Puntos</th></tr></thead>
+            <thead><tr><th>#</th><th>Participante</th><th style="text-align:center">Aciertos</th><th style="text-align:center">Exactos</th><th style="text-align:right">Puntos</th><th></th></tr></thead>
             <tbody>
               ${leaderboard.map((u, i) => {
                 const rank = i + 1;
                 const medal = rank===1?'gold':rank===2?'silver':rank===3?'bronze':'default';
                 const init = u.display_name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
                 const isMe = u.user_id === this.user.id || u.id === this.user.id;
+                const uid = u.user_id || u.id;
                 return `<tr style="${isMe ? 'background:rgba(201,168,76,0.06)' : ''}">
                   <td><span class="rank-medal ${medal}">${rank}</span></td>
                   <td class="user-cell"><span class="avatar">${init}</span><span>${u.display_name}${isMe ? ' <strong>(tú)</strong>' : ''}</span></td>
                   <td style="text-align:center">${u.correctPredictions ?? u.correct ?? 0}</td>
                   <td style="text-align:center">${u.exactScores ?? u.exact ?? 0}</td>
                   <td style="text-align:right;font-weight:700">${u.points}</td>
+                  <td style="text-align:right"><button class="btn-sm btn-ghost" onclick="app.showUserPredictions(${uid},'${u.display_name.replace(/'/g,'\\\'')}')" style="font-size:11px;padding:3px 8px">👁 Ver</button></td>
                 </tr>`;
               }).join('')}
             </tbody>
@@ -2099,6 +2205,29 @@ const app = {
         </div>
         <button class="btn-primary" style="width:auto;margin-top:12px" onclick="app.savePollaSettings()">Guardar configuración</button>
         <div class="success-msg" id="pollas-config-msg" style="margin-top:8px"></div>
+        <div style="margin-top:16px;padding:12px;background:var(--color-background-secondary);border-radius:var(--radius-md);border:1px solid var(--color-border)">
+          <div style="font-size:12px;font-weight:700;color:var(--color-primary);margin-bottom:10px">🔒 Control manual de bloqueo</div>
+          <div style="display:grid;gap:8px">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+              <span style="font-size:12px">⚽ Pronóstico 1 (Grupos) — Estado: <strong id="lock1-status">${arePolla1Locked ? '🔒 Bloqueado' : '🟢 Abierto'}</strong></span>
+              <div style="display:flex;gap:6px">
+                <button class="btn-sm" style="background:#166534;color:#fff;border:none;border-radius:4px;padding:4px 10px;cursor:pointer;font-size:11px" onclick="app.setPollaLock('polla1','unlock')">🔓 Abrir</button>
+                <button class="btn-sm" style="background:#991b1b;color:#fff;border:none;border-radius:4px;padding:4px 10px;cursor:pointer;font-size:11px" onclick="app.setPollaLock('polla1','lock')">🔒 Cerrar</button>
+                <button class="btn-sm" style="background:transparent;color:var(--color-text-muted);border:1px solid var(--color-border);border-radius:4px;padding:4px 10px;cursor:pointer;font-size:11px" onclick="app.setPollaLock('polla1','auto')">⏱ Auto</button>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+              <span style="font-size:12px">🏆 Pronóstico 2 (Eliminatorias) — Estado: <strong id="lock2-status">${arePolla2Locked ? '🔒 Bloqueado' : '🟢 Abierto'}</strong></span>
+              <div style="display:flex;gap:6px">
+                <button class="btn-sm" style="background:#166534;color:#fff;border:none;border-radius:4px;padding:4px 10px;cursor:pointer;font-size:11px" onclick="app.setPollaLock('polla2','unlock')">🔓 Abrir</button>
+                <button class="btn-sm" style="background:#991b1b;color:#fff;border:none;border-radius:4px;padding:4px 10px;cursor:pointer;font-size:11px" onclick="app.setPollaLock('polla2','lock')">🔒 Cerrar</button>
+                <button class="btn-sm" style="background:transparent;color:var(--color-text-muted);border:1px solid var(--color-border);border-radius:4px;padding:4px 10px;cursor:pointer;font-size:11px" onclick="app.setPollaLock('polla2','auto')">⏱ Auto</button>
+              </div>
+            </div>
+          </div>
+          <div style="font-size:10px;color:var(--color-text-muted);margin-top:8px">⏱ Auto = vuelve al bloqueo automático (5 min antes del partido)</div>
+          <div class="success-msg" id="lock-msg" style="margin-top:6px"></div>
+        </div>
       `;
     } catch (e) { container.innerHTML = `<div style="color:var(--color-danger)">Error: ${e.message}</div>`; }
   },
@@ -2124,6 +2253,27 @@ const app = {
       msg.textContent = '✓ Configuración guardada.';
       setTimeout(() => msg.textContent = '', 3000);
     } catch (e) { msg.textContent = e.message; msg.style.color = 'var(--color-danger)'; }
+  },
+
+  async setPollaLock(polla, action) {
+    const msg = document.getElementById('lock-msg');
+    try {
+      const result = await this.api(`/admin/pollas/${polla}/lock`, {
+        method: 'PUT',
+        body: JSON.stringify({ action })
+      });
+      const labels = { lock: '🔒 Cerrado manualmente', unlock: '🟢 Abierto manualmente', auto: '⏱ Automático' };
+      if (polla === 'polla1') {
+        const el = document.getElementById('lock1-status');
+        if (el) el.textContent = action === 'auto' ? (result.locked ? '🔒 Bloqueado (auto)' : '🟢 Abierto (auto)') : labels[action];
+      } else {
+        const el = document.getElementById('lock2-status');
+        if (el) el.textContent = action === 'auto' ? (result.polla2Locked ? '🔒 Bloqueado (auto)' : '🟢 Abierto (auto)') : labels[action];
+      }
+      msg.style.color = 'var(--color-success)';
+      msg.textContent = `✓ Polla ${polla === 'polla1' ? '1' : '2'} ${action === 'lock' ? 'cerrada' : action === 'unlock' ? 'abierta' : 'en modo automático'}.`;
+      setTimeout(() => msg.textContent = '', 3000);
+    } catch(e) { msg.style.color = 'var(--color-danger)'; msg.textContent = e.message; }
   },
 
   async renderAdminPollasRegs() {
