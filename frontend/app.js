@@ -1823,7 +1823,14 @@ const app = {
           </div>
           <div style="overflow-x:auto">
           <table class="leaderboard-table">
-            <thead><tr><th>#</th><th>Participante</th><th style="text-align:center">Aciertos</th><th style="text-align:center">Exactos</th><th style="text-align:right">Puntos</th></tr></thead>
+            <thead><tr>
+              <th>#</th>
+              <th>Participante</th>
+              <th style="text-align:center" title="Marcador exacto (5 pts)">🎯 Exacto</th>
+              <th style="text-align:center" title="Ganador + diferencia de goles correcta (3 pts)">📏 G+Dif</th>
+              <th style="text-align:center" title="Solo ganador correcto (2 pts)">✅ Ganador</th>
+              <th style="text-align:right">Puntos</th>
+            </tr></thead>
             <tbody>
               ${leaderboard.map((u, i) => {
                 const rank = i + 1;
@@ -1833,16 +1840,23 @@ const app = {
                 const uid = u.user_id || u.id;
                 this._lbNames = this._lbNames || {};
                 this._lbNames[uid] = u.display_name;
+                const ex = u.exactScores ?? u.exact ?? 0;
+                const df = u.diffCount ?? 0;
+                const wn = u.winnerCount ?? 0;
                 return `<tr style="${isMe ? 'background:rgba(201,168,76,0.06)' : ''}">
                   <td><span class="rank-medal ${medal}">${rank}</span></td>
-                  <td class="user-cell"><span class="avatar">${init}</span><span>${u.display_name}${isMe ? ' <strong>(tú)</strong>' : ''}</span><button title="Ver pronósticos" onclick="app.showUserPredictions(${uid})" style="margin-left:8px;font-size:12px;padding:2px 8px;border:1px solid var(--color-border);border-radius:6px;background:transparent;color:var(--color-text-muted);cursor:pointer;flex-shrink:0">👁 Ver</button></td>
-                  <td style="text-align:center">${u.correctPredictions ?? u.correct ?? 0}</td>
-                  <td style="text-align:center">${u.exactScores ?? u.exact ?? 0}</td>
-                  <td style="text-align:right;font-weight:700">${u.points}</td>
+                  <td class="user-cell"><span class="avatar">${init}</span><span>${u.display_name}${isMe ? ' <strong>(tú)</strong>' : ''}</span><button title="Ver pronósticos" onclick="app.showUserPredictions(${uid})" style="margin-left:8px;font-size:12px;padding:2px 8px;border:1px solid var(--color-border);border-radius:6px;background:transparent;color:var(--color-text-muted);cursor:pointer;flex-shrink:0">👁</button></td>
+                  <td style="text-align:center;font-weight:600;color:var(--color-primary)">${ex}</td>
+                  <td style="text-align:center">${df}</td>
+                  <td style="text-align:center">${wn}</td>
+                  <td style="text-align:right;font-weight:700;font-size:15px">${u.points}</td>
                 </tr>`;
               }).join('')}
             </tbody>
           </table>
+          </div>
+          <div style="font-size:10px;color:var(--color-text-muted);margin-top:6px;padding:0 4px">
+            🎯 Exacto = 5 pts · 📏 G+Dif = 3 pts · ✅ Ganador = 2 pts
           </div>`;
       };
 
