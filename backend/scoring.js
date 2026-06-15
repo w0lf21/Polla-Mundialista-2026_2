@@ -123,7 +123,12 @@ function calcUserTotalPoints(db, userId) {
 
   let total = 0;
   let correctPredictions = 0;
-  let exactScores = 0;
+  let exactScores = 0;   // count
+  let exactPts = 0;       // puntos acumulados por exactos
+  let diffCount = 0;      // ganador + diferencia correcta
+  let diffPts = 0;
+  let winnerCount = 0;    // solo ganador correcto
+  let winnerPts = 0;
 
   for (const m of matches) {
     if (m.pred_home == null && m.pred_winner == null) continue;
@@ -135,16 +140,37 @@ function calcUserTotalPoints(db, userId) {
       pts = calcKOMatchPoints(m, m);
     }
 
+    if (pts === 0) continue;
+
     total += pts;
-    if (pts > 0) correctPredictions++;
-    if (pts === POINTS.EXACT_SCORE || pts === POINTS.KO_EXACT || pts === POINTS.KO_EXACT_PEN_ALL) exactScores++;
+    correctPredictions++;
+
+    // Clasificar según el puntaje obtenido:
+    // Exactos: 5 (EXACT_SCORE, KO_EXACT, CORRECT_DRAW, KO_EXACT_PEN) u 8 (KO_EXACT_PEN_ALL)
+    // G+Dif:   3 (CORRECT_DIFF, KO_WINNER_DIFF, KO_DRAW_WINNER)
+    // Ganador: 2 (CORRECT_WINNER, KO_WINNER)
+    if (pts >= 5) {
+      exactScores++;
+      exactPts += pts;
+    } else if (pts === 3) {
+      diffCount++;
+      diffPts += pts;
+    } else if (pts === 2) {
+      winnerCount++;
+      winnerPts += pts;
+    }
   }
 
-  // NOTA: El podio ya no otorga puntos adicionales. Los puntos provienen únicamente
-  // de acertar los partidos de la Gran Final y el Tercer puesto en eliminatorias.
-  // (Antes se sumaban 15/10/6 pero eso duplicaba el conteo del mismo pronóstico.)
-
-  return { total, correctPredictions, exactScores };
+  return {
+    total,
+    correctPredictions,
+    exactScores,
+    exactPts,
+    diffCount,
+    diffPts,
+    winnerCount,
+    winnerPts
+  };
 }
 
 function calcDailyBetResults(db, matchId) {
