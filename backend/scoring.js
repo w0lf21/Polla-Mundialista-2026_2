@@ -38,9 +38,9 @@ function calcGroupMatchPoints(pred, real) {
 
   if (predResult !== realResult) return 0;
 
-  // Empate correcto pero no exacto: 0 pts (ya no hay CORRECT_DRAW parcial)
-  if (realResult === 'D') return 0;
-
+  // Empate correcto pero no exacto: la diferencia de goles es 0 en ambos → 3 pts (CORRECT_DIFF)
+  // Ganador correcto + diferencia correcta → 3 pts
+  // Ganador correcto solamente → 2 pts
   const predDiff = Math.abs(ph - pa);
   const realDiff = Math.abs(rh - ra);
   if (predDiff === realDiff) return POINTS.CORRECT_DIFF;
