@@ -567,14 +567,17 @@ app.get('/api/leaderboard/groups', (req, res) => {
       WHERE m.phase = 'groups' AND m.home_score IS NOT NULL
     `).all(u.user_id);
 
-    let total = 0, correct = 0, exact = 0;
+    let total = 0, correct = 0, exact = 0, exactPts = 0, diffCount = 0, diffPts = 0, winnerCount = 0, winnerPts = 0;
     for (const m of matches) {
       const pts = calcGroupMatchPoints(m, m);
+      if (pts === 0) continue;
       total += pts;
-      if (pts > 0) correct++;
-      if (pts === 5) exact++;
+      correct++;
+      if (pts >= 5) { exact++; exactPts += pts; }
+      else if (pts === 3) { diffCount++; diffPts += pts; }
+      else if (pts === 2) { winnerCount++; winnerPts += pts; }
     }
-    return { ...u, points: total, correctPredictions: correct, exactScores: exact };
+    return { ...u, points: total, correctPredictions: correct, exactScores: exact, exactPts, diffCount, diffPts, winnerCount, winnerPts };
   }).sort((a, b) => b.points - a.points || b.exactScores - a.exactScores);
 
   const totalPot = regs.length * netFee;
@@ -612,14 +615,17 @@ app.get('/api/leaderboard/knockout', (req, res) => {
       WHERE m.phase != 'groups' AND m.home_score IS NOT NULL
     `).all(u.user_id);
 
-    let total = 0, correct = 0, exact = 0;
+    let total = 0, correct = 0, exact = 0, exactPts = 0, diffCount = 0, diffPts = 0, winnerCount = 0, winnerPts = 0;
     for (const m of matches) {
       const pts = calcKOMatchPoints(m, m);
+      if (pts === 0) continue;
       total += pts;
-      if (pts > 0) correct++;
-      if (pts === 5 || pts === 8) exact++;
+      correct++;
+      if (pts >= 5) { exact++; exactPts += pts; }
+      else if (pts === 3) { diffCount++; diffPts += pts; }
+      else if (pts === 2) { winnerCount++; winnerPts += pts; }
     }
-    return { ...u, points: total, correctPredictions: correct, exactScores: exact };
+    return { ...u, points: total, correctPredictions: correct, exactScores: exact, exactPts, diffCount, diffPts, winnerCount, winnerPts };
   }).sort((a, b) => b.points - a.points || b.exactScores - a.exactScores);
 
   const totalPot = regs.length * netFee;
@@ -637,7 +643,17 @@ app.get('/api/leaderboard', (req, res) => {
   const users = db.prepare('SELECT id, username, display_name, paid_entry FROM users WHERE is_admin = 0').all();
   const leaderboard = users.map(u => {
     const stats = calcUserTotalPoints(db, u.id);
-    return { ...u, points: stats.total, correctPredictions: stats.correctPredictions, exactScores: stats.exactScores };
+    return {
+      ...u,
+      points: stats.total,
+      correctPredictions: stats.correctPredictions,
+      exactScores: stats.exactScores,
+      exactPts: stats.exactPts,
+      diffCount: stats.diffCount,
+      diffPts: stats.diffPts,
+      winnerCount: stats.winnerCount,
+      winnerPts: stats.winnerPts
+    };
   }).sort((a, b) => b.points - a.points || b.exactScores - a.exactScores);
   res.json(leaderboard);
 });
