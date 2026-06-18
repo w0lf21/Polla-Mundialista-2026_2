@@ -130,7 +130,27 @@ const app = {
   },
 
   showLogin() {
-    document.getElementById('login-screen').classList.add('active');
+    // Limpiar residuos de la animación de entrada
+    const loginScreen = document.getElementById('login-screen');
+    loginScreen.style.opacity = '';
+    loginScreen.style.transition = '';
+    document.getElementById('entry-overlay')?.remove();
+
+    // Resetear formularios
+    document.getElementById('login-form')?.reset();
+    document.getElementById('register-form')?.reset();
+    document.getElementById('login-error').textContent = '';
+    document.getElementById('register-error').textContent = '';
+
+    // Restaurar tab de login activo
+    document.querySelectorAll('.tab-toggle').forEach(b => {
+      b.classList.toggle('active', b.dataset.tab === 'login');
+    });
+    document.getElementById('login-form').classList.add('active');
+    document.getElementById('register-form').classList.remove('active');
+
+    // Cambiar pantallas
+    loginScreen.classList.add('active');
     document.getElementById('app-screen').classList.remove('active');
   },
 
