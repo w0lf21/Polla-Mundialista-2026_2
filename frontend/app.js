@@ -59,6 +59,9 @@ const app = {
         this.user = data.user;
         sessionStorage.setItem('polla_token', this.token);
         await this.loadData();
+        // Restaurar el botón antes de entrar (evita que quede en "Entrando..." al volver al login)
+        btn.classList.remove('btn-login-loading');
+        btn.textContent = 'Entrar';
         this.showApp();
       } catch (e) {
         btn.classList.remove('btn-login-loading');
@@ -141,6 +144,13 @@ const app = {
     document.getElementById('register-form')?.reset();
     document.getElementById('login-error').textContent = '';
     document.getElementById('register-error').textContent = '';
+
+    // Restaurar el botón de login (queda en "Entrando..." tras un login exitoso)
+    const loginBtn = document.querySelector('#login-form button[type=submit]');
+    if (loginBtn) {
+      loginBtn.classList.remove('btn-login-loading');
+      loginBtn.textContent = 'Entrar';
+    }
 
     // Restaurar tab de login activo
     document.querySelectorAll('.tab-toggle').forEach(b => {
