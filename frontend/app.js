@@ -1947,19 +1947,17 @@ const app = {
         const date = daily.date ? new Date(daily.date + 'T12:00:00').toLocaleDateString('es-EC', { weekday:'long', day:'numeric', month:'long' }) : '';
         const medals = ['🥇','🥈','🥉'];
         const cards = daily.top.map((u, i) => `
-          <div style="flex:1;min-width:120px;background:var(--color-surface);border:1px solid ${u.isGJ ? 'rgba(201,168,76,0.4)' : 'var(--color-border)'};border-radius:10px;padding:10px 12px;text-align:center;${u.isGJ ? 'box-shadow:0 0 12px rgba(201,168,76,0.15)' : ''}">
-            <div style="font-size:22px;margin-bottom:2px">${medals[i]}</div>
-            <div style="font-size:12px;font-weight:700;color:var(--color-text)">${u.display_name.split(' ')[0]}</div>
-            <div style="font-size:18px;font-weight:700;color:var(--color-primary);margin:2px 0">${u.pts} pts</div>
-            ${u.exactos > 0 ? `<div style="font-size:10px;color:var(--color-text-muted)">🎯 ${u.exactos} exacto${u.exactos>1?'s':''}</div>` : ''}
-            ${u.isGJ ? '<div style="font-size:10px;font-weight:700;color:#C9A84C;margin-top:4px">⭐ GJ</div>' : ''}
+          <div style="display:flex;align-items:center;gap:6px;padding:4px 8px;background:var(--color-background-secondary);border:1px solid ${u.isGJ ? 'rgba(201,168,76,0.3)' : 'var(--color-border)'};border-radius:8px;font-size:11px">
+            <span>${medals[i]}</span>
+            <span style="font-weight:600;color:var(--color-text)">${u.display_name.split(' ')[0]}</span>
+            <span style="font-weight:700;color:var(--color-primary)">${u.pts}pts</span>
+            ${u.exactos > 0 ? `<span style="color:var(--color-text-muted)">🎯${u.exactos}</span>` : ''}
+            ${u.isGJ ? '<span style="color:#C9A84C;font-weight:700">⭐GJ</span>' : ''}
           </div>`).join('');
         return `
-          <div style="background:var(--color-surface);border:1px solid var(--color-border);border-radius:12px;padding:12px 14px;margin-bottom:1rem">
-            <div style="font-size:11px;font-weight:700;color:var(--color-primary);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">
-              ⭐ Ganadores de la jornada — ${date} (${daily.matchCount} partido${daily.matchCount>1?'s':''})
-            </div>
-            <div style="display:flex;gap:8px;flex-wrap:wrap">${cards}</div>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:7px 10px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:8px;margin-bottom:10px">
+            <span style="font-size:10px;font-weight:700;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:0.5px;white-space:nowrap">⭐ Jornada anterior · ${date}</span>
+            ${cards}
           </div>`;
       };
 
