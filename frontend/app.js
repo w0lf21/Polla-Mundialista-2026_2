@@ -176,7 +176,7 @@ const app = {
     overlay.id = 'entry-overlay';
     overlay.innerHTML = `
       <div class="entry-flash"></div>
-      <img src="logo-mundial-2026.jpg" alt="" class="entry-logo">
+      <img src="logo-mundial-2026.png" alt="" class="entry-logo">
     `;
     document.body.appendChild(overlay);
 
