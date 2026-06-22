@@ -1933,10 +1933,35 @@ const app = {
   async renderLeaderboard(main) {
     main.innerHTML = '<h2>Ranking</h2><div style="color:var(--color-text-muted)">Cargando...</div>';
     try {
-      const [lb1, lb2] = await Promise.all([
+      const [lb1, lb2, dailyTop] = await Promise.all([
         this.api('/leaderboard/groups'),
-        this.api('/leaderboard/knockout')
+        this.api('/leaderboard/knockout'),
+        this.api('/leaderboard/daily-top').catch(() => null)
       ]);
+
+      // GJ ids del día anterior
+      const gjIds = new Set((dailyTop?.gjIds) || []);
+
+      const renderDailyTop = (daily) => {
+        if (!daily?.hasData || !daily.top.length) return '';
+        const date = daily.date ? new Date(daily.date + 'T12:00:00').toLocaleDateString('es-EC', { weekday:'long', day:'numeric', month:'long' }) : '';
+        const medals = ['🥇','🥈','🥉'];
+        const cards = daily.top.map((u, i) => `
+          <div style="flex:1;min-width:120px;background:var(--color-surface);border:1px solid ${u.isGJ ? 'rgba(201,168,76,0.4)' : 'var(--color-border)'};border-radius:10px;padding:10px 12px;text-align:center;${u.isGJ ? 'box-shadow:0 0 12px rgba(201,168,76,0.15)' : ''}">
+            <div style="font-size:22px;margin-bottom:2px">${medals[i]}</div>
+            <div style="font-size:12px;font-weight:700;color:var(--color-text)">${u.display_name.split(' ')[0]}</div>
+            <div style="font-size:18px;font-weight:700;color:var(--color-primary);margin:2px 0">${u.pts} pts</div>
+            ${u.exactos > 0 ? `<div style="font-size:10px;color:var(--color-text-muted)">🎯 ${u.exactos} exacto${u.exactos>1?'s':''}</div>` : ''}
+            ${u.isGJ ? '<div style="font-size:10px;font-weight:700;color:#C9A84C;margin-top:4px">⭐ GJ</div>' : ''}
+          </div>`).join('');
+        return `
+          <div style="background:var(--color-surface);border:1px solid var(--color-border);border-radius:12px;padding:12px 14px;margin-bottom:1rem">
+            <div style="font-size:11px;font-weight:700;color:var(--color-primary);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">
+              ⭐ Ganadores de la jornada — ${date} (${daily.matchCount} partido${daily.matchCount>1?'s':''})
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">${cards}</div>
+          </div>`;
+      };
 
       const renderTable = (data) => {
         const { leaderboard, totalPot, prizes, splits } = data;
@@ -1977,7 +2002,7 @@ const app = {
                 const wn = u.winnerCount ?? 0;
                 return `<tr style="${isMe ? 'background:rgba(201,168,76,0.06)' : ''}">
                   <td><span class="rank-medal ${medal}">${rank}</span></td>
-                  <td class="user-cell"><span class="avatar">${init}</span><span>${u.display_name}${isMe ? ' <strong>(tú)</strong>' : ''}</span><button title="Ver pronósticos" onclick="app.showUserPredictions(${uid})" style="margin-left:8px;font-size:12px;padding:2px 8px;border:1px solid var(--color-border);border-radius:6px;background:transparent;color:var(--color-text-muted);cursor:pointer;flex-shrink:0">👁</button></td>
+                  <td class="user-cell"><span class="avatar">${init}</span><span>${u.display_name}${isMe ? ' <strong>(tú)</strong>' : ''}${gjIds.has(uid) ? ' <span title="Ganador de la Jornada" style="font-size:11px;background:rgba(201,168,76,0.15);color:#C9A84C;border:1px solid rgba(201,168,76,0.3);border-radius:10px;padding:1px 6px;margin-left:4px">⭐ GJ</span>' : ''}</span><button title="Ver pronósticos" onclick="app.showUserPredictions(${uid})" style="margin-left:8px;font-size:12px;padding:2px 8px;border:1px solid var(--color-border);border-radius:6px;background:transparent;color:var(--color-text-muted);cursor:pointer;flex-shrink:0">👁</button></td>
                   <td style="text-align:center;font-weight:600;color:var(--color-primary)">${ex}</td>
                   <td style="text-align:center">${df}</td>
                   <td style="text-align:center">${wn}</td>
@@ -1997,6 +2022,7 @@ const app = {
 
       main.innerHTML = `
         <h2>Ranking</h2>
+        ${renderDailyTop(dailyTop)}
         <div style="display:flex;gap:4px;margin-bottom:1rem;flex-wrap:wrap">
           <button class="fixture-tab active" id="rank-tab-groups" onclick="app.switchRankTab('groups')">⚽ Fase de Grupos</button>
           <button class="fixture-tab" id="rank-tab-knockout" onclick="app.switchRankTab('knockout')">🏆 Eliminatorias</button>
