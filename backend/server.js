@@ -658,6 +658,71 @@ app.get('/api/leaderboard', (req, res) => {
   res.json(leaderboard);
 });
 
+// Detalle de puntos partido a partido de un usuario (accesible a cualquier autenticado)
+app.get('/api/users/:id/points-breakdown', authMiddleware, (req, res) => {
+  const targetId = parseInt(req.params.id);
+  const targetUser = db.prepare('SELECT id, display_name FROM users WHERE id = ?').get(targetId);
+  if (!targetUser) return res.status(404).json({ error: 'Usuario no encontrado' });
+
+  const matches = db.prepare(`
+    SELECT m.id, m.phase, m.group_name, m.home_team, m.away_team,
+           m.home_score, m.away_score, m.match_date, m.match_time,
+           p.pred_home, p.pred_away, p.pred_winner
+    FROM matches m
+    LEFT JOIN predictions p ON p.match_id = m.id AND p.user_id = ?
+    WHERE m.home_score IS NOT NULL AND m.away_score IS NOT NULL
+    ORDER BY m.match_date ASC, m.match_time ASC
+  `).all(targetId);
+
+  const teamMap = Object.fromEntries(
+    db.prepare('SELECT * FROM teams').all().map(t => [t.code, t])
+  );
+
+  const rows = matches.map(m => {
+    let pts = 0;
+    let category = null;
+
+    if (m.pred_home != null || m.pred_winner != null) {
+      if (m.phase === 'groups') {
+        pts = calcGroupMatchPoints(m, m);
+        if (pts === 5) category = 'exacto';
+        else if (pts === 3) category = 'g+dif';
+        else if (pts === 2) category = 'ganador';
+        else category = 'fallo';
+      } else {
+        pts = calcKOMatchPoints(m, m);
+        if (pts >= 5) category = 'exacto';
+        else if (pts === 3) category = 'g+dif';
+        else if (pts === 2) category = 'ganador';
+        else category = 'fallo';
+      }
+    } else {
+      category = 'sin_pronostico';
+    }
+
+    return {
+      match_id: m.id,
+      phase: m.phase,
+      group_name: m.group_name,
+      match_date: m.match_date,
+      home_team: m.home_team,
+      away_team: m.away_team,
+      home_flag: teamMap[m.home_team]?.flag || '?',
+      away_flag: teamMap[m.away_team]?.flag || '?',
+      home_name: teamMap[m.home_team]?.name || m.home_team,
+      away_name: teamMap[m.away_team]?.name || m.away_team,
+      real_home: m.home_score,
+      real_away: m.away_score,
+      pred_home: m.pred_home,
+      pred_away: m.pred_away,
+      pts,
+      category
+    };
+  }).filter(r => r.category !== 'sin_pronostico');
+
+  res.json({ user: targetUser, matches: rows });
+});
+
 // ─── POLLAS — INSCRIPCIONES ──────────────────────────────────────────────────
 
 app.get('/api/pollas/status', authMiddleware, (req, res) => {
