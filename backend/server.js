@@ -723,6 +723,55 @@ app.get('/api/users/:id/points-breakdown', authMiddleware, (req, res) => {
   res.json({ user: targetUser, matches: rows });
 });
 
+// Top del día anterior — puntos acumulados por cada usuario en partidos de ayer (ECU UTC-5)
+app.get('/api/leaderboard/daily-top', authMiddleware, (req, res) => {
+  // "Ayer" en hora Ecuador (UTC-5): restar 5h al UTC actual y tomar la fecha
+  const nowECU = new Date(Date.now() - 5 * 60 * 60 * 1000);
+  const yesterdayECU = new Date(nowECU);
+  yesterdayECU.setUTCDate(yesterdayECU.getUTCDate() - 1);
+  const yesterday = yesterdayECU.toISOString().slice(0, 10); // YYYY-MM-DD
+
+  const matchesYesterday = db.prepare(`
+    SELECT m.id, m.home_score, m.away_score, m.phase, m.winner, m.pen_home, m.pen_away
+    FROM matches m
+    WHERE m.match_date = ? AND m.home_score IS NOT NULL
+  `).all(yesterday);
+
+  if (!matchesYesterday.length) {
+    return res.json({ date: yesterday, top: [], hasData: false });
+  }
+
+  const users = db.prepare('SELECT id, display_name FROM users WHERE is_admin = 0').all();
+
+  const daily = users.map(u => {
+    let pts = 0, exactos = 0;
+    for (const m of matchesYesterday) {
+      const pred = db.prepare(
+        'SELECT pred_home, pred_away, pred_winner, pred_pen_home, pred_pen_away FROM predictions WHERE user_id = ? AND match_id = ?'
+      ).get(u.id, m.id);
+      if (!pred) continue;
+      const p = m.phase === 'groups'
+        ? calcGroupMatchPoints({ ...pred, home_score: m.home_score, away_score: m.away_score }, { home_score: m.home_score, away_score: m.away_score })
+        : calcKOMatchPoints({ ...pred, home_score: m.home_score, away_score: m.away_score, winner: m.winner, pen_home: m.pen_home, pen_away: m.pen_away }, { home_score: m.home_score, away_score: m.away_score, winner: m.winner, pen_home: m.pen_home, pen_away: m.pen_away });
+      pts += p;
+      if (p >= 5) exactos++;
+    }
+    return { user_id: u.id, display_name: u.display_name, pts, exactos };
+  }).filter(u => u.pts > 0)
+    .sort((a, b) => b.pts - a.pts || b.exactos - a.exactos);
+
+  // GJ = todos los que tienen el máximo de puntos del día
+  const maxPts = daily[0]?.pts ?? 0;
+  const top3 = daily.slice(0, 3).map((u, i) => ({
+    ...u,
+    rank: i + 1,
+    isGJ: u.pts === maxPts
+  }));
+  const gjIds = new Set(daily.filter(u => u.pts === maxPts).map(u => u.user_id));
+
+  res.json({ date: yesterday, top: top3, gjIds: [...gjIds], hasData: true, matchCount: matchesYesterday.length });
+});
+
 // ─── POLLAS — INSCRIPCIONES ──────────────────────────────────────────────────
 
 app.get('/api/pollas/status', authMiddleware, (req, res) => {
