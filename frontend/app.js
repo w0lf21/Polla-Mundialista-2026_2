@@ -176,7 +176,7 @@ const app = {
     overlay.id = 'entry-overlay';
     overlay.innerHTML = `
       <div class="entry-flash"></div>
-      <img src="logo-mundial-2026.png" alt="" class="entry-logo">
+      <img src="logo-mundial-2026.jpg" alt="" class="entry-logo">
     `;
     document.body.appendChild(overlay);
 
@@ -836,6 +836,108 @@ const app = {
       `;
     } catch (e) {
       container.innerHTML = `<div style="text-align:center;color:var(--color-error);padding:2rem">Error al cargar: ${e.message}</div>`;
+    }
+  },
+
+  // ── DETALLE DE PUNTOS (partido a partido) ──────────────────────────────────
+
+  async showPointsBreakdown(userId, displayName) {
+    document.getElementById('pts-breakdown-modal')?.remove();
+
+    const modal = document.createElement('div');
+    modal.id = 'pts-breakdown-modal';
+    modal.innerHTML = `
+      <style>
+        #pts-breakdown-modal { position:fixed;inset:0;z-index:8001;background:rgba(0,0,0,0.85);display:flex;align-items:flex-start;justify-content:center;padding:20px 10px;overflow-y:auto; }
+        #pts-breakdown-modal .pbm-panel { width:min(680px,100%);background:var(--color-background,#101018);border:1px solid var(--color-border);border-radius:14px;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.5); }
+        #pts-breakdown-modal .pbm-head { display:flex;justify-content:space-between;align-items:center;padding:13px 16px;border-bottom:1px solid var(--color-border);flex-shrink:0; }
+        #pts-breakdown-modal .pbm-title { font-weight:700;font-size:15px; }
+        #pts-breakdown-modal .pbm-close { background:transparent;border:1px solid var(--color-border);color:var(--color-text-muted);font-size:14px;cursor:pointer;border-radius:8px;padding:5px 10px; }
+        #pts-breakdown-modal .pbm-body { padding:14px 16px 20px;overflow-y:auto;max-height:80vh; }
+        #pts-breakdown-modal .pbm-summary { display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px; }
+        #pts-breakdown-modal .pbm-chip { padding:6px 12px;border-radius:20px;font-size:12px;font-weight:600;background:var(--color-surface);border:1px solid var(--color-border); }
+        #pts-breakdown-modal .pbm-chip.total { background:rgba(201,168,76,0.12);border-color:rgba(201,168,76,0.35);color:var(--color-primary); }
+        #pts-breakdown-modal table.pbm-t { width:100%;border-collapse:collapse;font-size:12px; }
+        #pts-breakdown-modal table.pbm-t th { font-size:10px;color:var(--color-text-muted);font-weight:500;padding:4px 6px;text-align:left;border-bottom:1px solid var(--color-border); }
+        #pts-breakdown-modal table.pbm-t td { padding:5px 6px;border-bottom:1px solid rgba(255,255,255,0.04);vertical-align:middle; }
+        #pts-breakdown-modal table.pbm-t tr:last-child td { border-bottom:none; }
+        #pts-breakdown-modal .pbm-pts-5 { color:#C9A84C;font-weight:700; }
+        #pts-breakdown-modal .pbm-pts-3 { color:#60a5fa;font-weight:600; }
+        #pts-breakdown-modal .pbm-pts-2 { color:#4ade80;font-weight:600; }
+        #pts-breakdown-modal .pbm-pts-0 { color:var(--color-text-muted); }
+        #pts-breakdown-modal .pbm-badge { display:inline-block;padding:1px 6px;border-radius:8px;font-size:10px;font-weight:600; }
+        #pts-breakdown-modal .pbm-badge.exacto { background:rgba(201,168,76,0.15);color:#C9A84C; }
+        #pts-breakdown-modal .pbm-badge.gdif { background:rgba(96,165,250,0.15);color:#60a5fa; }
+        #pts-breakdown-modal .pbm-badge.ganador { background:rgba(74,222,128,0.15);color:#4ade80; }
+        #pts-breakdown-modal .pbm-badge.fallo { background:rgba(255,255,255,0.06);color:var(--color-text-muted); }
+      </style>
+      <div class="pbm-panel">
+        <div class="pbm-head">
+          <div class="pbm-title">📊 Puntos de <span style="color:var(--color-primary)">${displayName}</span></div>
+          <button class="pbm-close" onclick="document.getElementById('pts-breakdown-modal').remove()">✕ Cerrar</button>
+        </div>
+        <div class="pbm-body" id="pts-breakdown-content">
+          <div style="text-align:center;color:var(--color-text-muted);padding:2rem">Cargando...</div>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+    modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+
+    const container = document.getElementById('pts-breakdown-content');
+    try {
+      const data = await this.api(`/users/${userId}/points-breakdown`);
+      const { matches } = data;
+
+      if (!matches.length) {
+        container.innerHTML = `<div style="text-align:center;padding:2rem;color:var(--color-text-muted)">Aún no hay partidos puntuados.</div>`;
+        return;
+      }
+
+      const total = matches.reduce((s, m) => s + m.pts, 0);
+      const exactos = matches.filter(m => m.category === 'exacto').length;
+      const gdif = matches.filter(m => m.category === 'g+dif').length;
+      const ganador = matches.filter(m => m.category === 'ganador').length;
+      const fallos = matches.filter(m => m.category === 'fallo').length;
+
+      const catLabel = { exacto: 'Exacto', 'g+dif': 'G+Dif', ganador: 'Ganador', fallo: 'Fallo' };
+      const catClass = { exacto: 'exacto', 'g+dif': 'gdif', ganador: 'ganador', fallo: 'fallo' };
+      const ptsClass = { exacto: 'pbm-pts-5', 'g+dif': 'pbm-pts-3', ganador: 'pbm-pts-2', fallo: 'pbm-pts-0' };
+
+      const rows = matches.map(m => {
+        const predStr = m.pred_home != null ? `${m.pred_home}-${m.pred_away}` : (m.pred_winner || '—');
+        const realStr = `${m.real_home}-${m.real_away}`;
+        const grpLabel = m.phase === 'groups' ? `Gr.${m.group_name}` : m.phase.toUpperCase();
+        return `<tr>
+          <td style="color:var(--color-text-muted);font-size:10px;white-space:nowrap">${m.match_date?.slice(5,10) || ''}<br><span style="font-size:9px">${grpLabel}</span></td>
+          <td style="white-space:nowrap">${m.home_flag} ${m.home_name}</td>
+          <td style="text-align:center;font-size:11px;white-space:nowrap">
+            <span style="background:var(--color-surface);padding:1px 5px;border-radius:4px;font-weight:600">${realStr}</span>
+          </td>
+          <td style="white-space:nowrap">${m.away_flag} ${m.away_name}</td>
+          <td style="text-align:center;color:var(--color-text-muted)">${predStr}</td>
+          <td style="text-align:center"><span class="pbm-badge ${catClass[m.category]}">${catLabel[m.category]}</span></td>
+          <td style="text-align:right" class="${ptsClass[m.category]}">${m.pts > 0 ? '+' + m.pts : '0'}</td>
+        </tr>`;
+      }).join('');
+
+      container.innerHTML = `
+        <div class="pbm-summary">
+          <div class="pbm-chip total">🏆 Total: ${total} pts</div>
+          <div class="pbm-chip">🎯 Exactos: ${exactos}</div>
+          <div class="pbm-chip">📏 G+Dif: ${gdif}</div>
+          <div class="pbm-chip">✅ Ganador: ${ganador}</div>
+          <div class="pbm-chip">❌ Fallos: ${fallos}</div>
+        </div>
+        <table class="pbm-t">
+          <thead><tr>
+            <th>Fecha</th><th>Local</th><th style="text-align:center">Resultado</th><th>Visitante</th>
+            <th style="text-align:center">Mi pronóstico</th><th style="text-align:center">Categoría</th>
+            <th style="text-align:right">Pts</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>`;
+    } catch(e) {
+      container.innerHTML = `<div style="color:var(--color-danger);padding:1rem">⚠️ ${e.message}</div>`;
     }
   },
 
@@ -1879,7 +1981,10 @@ const app = {
                   <td style="text-align:center;font-weight:600;color:var(--color-primary)">${ex}</td>
                   <td style="text-align:center">${df}</td>
                   <td style="text-align:center">${wn}</td>
-                  <td style="text-align:right;font-weight:700;font-size:15px">${u.points}</td>
+                  <td style="text-align:right">
+                    <span style="font-weight:700;font-size:15px">${u.points}</span>
+                    <button title="Ver detalle de puntos" onclick="app.showPointsBreakdown(${uid},'${u.display_name.replace(/'/g, "\\'")}')" style="margin-left:6px;font-size:11px;padding:2px 7px;border:1px solid var(--color-border);border-radius:6px;background:transparent;color:var(--color-text-muted);cursor:pointer;vertical-align:middle">Ver</button>
+                  </td>
                 </tr>`;
               }).join('')}
             </tbody>
