@@ -176,7 +176,7 @@ const app = {
     overlay.id = 'entry-overlay';
     overlay.innerHTML = `
       <div class="entry-flash"></div>
-      <img src="logo-mundial-2026.png" alt="" class="entry-logo">
+      <img src="logo-mundial-2026.jpg" alt="" class="entry-logo">
     `;
     document.body.appendChild(overlay);
 
@@ -232,12 +232,12 @@ const app = {
   renderNav() {
     const views = [
       { id: 'fixture',    label: 'Fixture' },
+      { id: 'leaderboard',label: 'Ranking' },
       { id: 'today',      label: 'Hoy' },
       { id: 'groups',     label: 'Grupos' },
       { id: 'knockout',   label: 'Eliminatorias' },
       { id: 'podium',     label: 'Podio' },
       { id: 'minipollas', label: 'Mini-Pronósticos' },
-      { id: 'leaderboard',label: 'Ranking' },
       { id: 'rules',      label: 'Reglas' }
     ];
     if (this.user.is_admin) views.push({ id: 'admin', label: 'Admin' });
@@ -343,26 +343,80 @@ const app = {
       </div>`;
     };
 
-    // ── Grupos HTML
+    // ── Grupos HTML unificado: resultado real + mi pronóstico lado a lado
+    const myPredsByMatch = this.predictions || {};
     const groupsHtml = Object.keys(sortedGroups).sort().map(g => {
       const standing = sortedGroups[g];
       const color = groupColors[g] || '#C9A84C';
+      const gMatches = groupMatches.filter(m => m.group_name === g);
+
+      // Tabla comparativa de partidos: resultado real vs mi pronóstico
+      const matchRows = gMatches.map(m => {
+        const home = this.teamByCode(m.home_team);
+        const away = this.teamByCode(m.away_team);
+        const pred = myPredsByMatch[m.id];
+        const hasResult = m.home_score != null;
+        const hasPred = pred && pred.pred_home != null;
+        const realStr = hasResult ? `${m.home_score}-${m.away_score}` : '–';
+        const predStr = hasPred ? `${pred.pred_home}-${pred.pred_away}` : '–';
+
+        // Calcular puntos obtenidos si hay resultado
+        let pts = null;
+        let ptsColor = 'var(--color-text-muted)';
+        if (hasResult && hasPred) {
+          const ph = parseInt(pred.pred_home), pa = parseInt(pred.pred_away);
+          const rh = parseInt(m.home_score), ra = parseInt(m.away_score);
+          if (ph === rh && pa === ra) { pts = 5; ptsColor = '#C9A84C'; }
+          else {
+            const pr = ph > pa ? 'H' : ph < pa ? 'A' : 'D';
+            const rr = rh > ra ? 'H' : rh < ra ? 'A' : 'D';
+            if (pr !== rr) { pts = 0; ptsColor = 'var(--color-text-muted)'; }
+            else if (Math.abs(ph-pa) === Math.abs(rh-ra)) { pts = 3; ptsColor = '#60a5fa'; }
+            else { pts = 2; ptsColor = '#4ade80'; }
+          }
+        }
+
+        return `<tr style="${!hasResult ? 'opacity:0.7' : ''}">
+          <td style="font-size:11px;white-space:nowrap">${home.flag} ${home.name}</td>
+          <td style="text-align:center;font-size:11px;padding:2px 4px">
+            <span style="background:var(--color-background-secondary);border-radius:4px;padding:1px 5px;font-weight:600">${realStr}</span>
+          </td>
+          <td style="text-align:center;font-size:11px;padding:2px 4px">
+            <span style="background:${hasPred ? 'rgba(255,255,255,0.06)' : 'transparent'};border-radius:4px;padding:1px 5px;color:${hasPred ? 'var(--color-text)' : 'var(--color-text-muted)'}">${predStr}</span>
+          </td>
+          <td style="text-align:right;font-size:11px;font-weight:700;color:${ptsColor};white-space:nowrap">${pts !== null ? (pts > 0 ? '+'+pts : '✗') : ''}</td>
+          <td style="font-size:11px;white-space:nowrap;text-align:right">${away.name} ${away.flag}</td>
+        </tr>`;
+      }).join('');
+
       return `
         <div class="fixture-group-card" style="border-left:3px solid ${color}">
           <div class="fixture-group-title" style="color:${color}">Grupo ${g}</div>
-          <table class="fixture-group-table">
-            <thead><tr><th></th><th>Equipo</th><th>PJ</th><th>Pts</th><th>GD</th></tr></thead>
-            <tbody>
-              ${standing.map((t, i) => `
-                <tr class="${i < 2 ? 'classified' : ''}">
-                  <td style="font-size:11px;color:var(--color-text-muted)">${i+1}</td>
-                  <td><span style="margin-right:4px">${t.flag}</span>${t.name}</td>
-                  <td style="text-align:center">${t.pj}</td>
-                  <td style="text-align:center;font-weight:${i<2?'700':'400'}">${t.pts}</td>
-                  <td style="text-align:center">${t.gd > 0 ? '+' : ''}${t.gd}</td>
-                </tr>
-              `).join('')}
-            </tbody>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+            <div>
+              <div style="font-size:9px;font-weight:700;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Real</div>
+              <table class="fixture-group-table">
+                <thead><tr><th></th><th>Equipo</th><th>PJ</th><th>Pts</th><th>GD</th></tr></thead>
+                <tbody>
+                  ${standing.map((t, i) => `
+                    <tr class="${i < 2 ? 'classified' : ''}">
+                      <td style="font-size:11px;color:var(--color-text-muted)">${i+1}</td>
+                      <td><span style="margin-right:4px">${t.flag}</span>${t.name}</td>
+                      <td style="text-align:center">${t.pj}</td>
+                      <td style="text-align:center;font-weight:${i<2?'700':'400'}">${t.pts}</td>
+                      <td style="text-align:center">${t.gd > 0 ? '+' : ''}${t.gd}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div style="font-size:9px;font-weight:700;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;display:flex;justify-content:space-between">
+            <span>Partidos</span>
+            <span style="display:flex;gap:20px"><span>Real</span><span>Mi pred</span><span>Pts</span></span>
+          </div>
+          <table style="width:100%;border-collapse:collapse">
+            <tbody>${matchRows}</tbody>
           </table>
         </div>`;
     }).join('');
@@ -545,7 +599,6 @@ const app = {
       <div class="fixture-tabs">
         <button class="fixture-tab ${this._fixtureTab === 'groups' ? 'active' : ''}" data-tab="groups">Fase de Grupos</button>
         <button class="fixture-tab ${this._fixtureTab === 'finals' ? 'active' : ''}" data-tab="finals">Eliminatorias</button>
-        <button class="fixture-tab ${this._fixtureTab === 'mypred' ? 'active' : ''}" data-tab="mypred">⚽ Mi Pronóstico</button>
       </div>
       <div class="fixture-tab-content ${this._fixtureTab === 'groups' ? 'active' : ''}" id="ftab-groups">
         <div class="fixture-groups-grid">${groupsHtml}</div>
@@ -553,9 +606,6 @@ const app = {
       <div class="fixture-tab-content ${this._fixtureTab === 'finals' ? 'active' : ''}" id="ftab-finals">
         <div class="pw-scroll-hint">← Desliza horizontalmente para ver el bracket completo →</div>
         <div class="pw-bracket-wrapper">${bracketDesktopHtml}</div>
-      </div>
-      <div class="fixture-tab-content ${this._fixtureTab === 'mypred' ? 'active' : ''}" id="ftab-mypred">
-        <div id="mypred-content" style="text-align:center;color:var(--color-text-muted);padding:2rem">Cargando mi pronóstico...</div>
       </div>
     `;
 
@@ -567,16 +617,8 @@ const app = {
         main.querySelectorAll('.fixture-tab-content').forEach(c => c.classList.remove('active'));
         main.getElementById ? null : main.querySelector(`#ftab-${this._fixtureTab}`).classList.add('active');
         document.getElementById(`ftab-${this._fixtureTab}`).classList.add('active');
-        if (btn.dataset.tab === 'mypred' && !this._mypredLoaded) {
-          this._mypredLoaded = true;
-          this.loadMyPredictions();
-        }
       });
     });
-    if (this._fixtureTab === 'mypred') {
-      this._mypredLoaded = true;
-      this.loadMyPredictions();
-    }
   },
 
   // ── MI PRONÓSTICO ──────────────────────────────────────────────────────────
@@ -836,6 +878,101 @@ const app = {
       `;
     } catch (e) {
       container.innerHTML = `<div style="text-align:center;color:var(--color-error);padding:2rem">Error al cargar: ${e.message}</div>`;
+    }
+  },
+
+  // ── COMPARARME CON OTRO JUGADOR ─────────────────────────────────────────────
+
+  async showCompare(rivalId, rivalName) {
+    document.getElementById('compare-modal')?.remove();
+    const modal = document.createElement('div');
+    modal.id = 'compare-modal';
+    modal.innerHTML = `
+      <style>
+        #compare-modal { position:fixed;inset:0;z-index:8002;background:rgba(0,0,0,0.85);display:flex;align-items:flex-start;justify-content:center;padding:20px 10px;overflow-y:auto; }
+        #compare-modal .cmp-panel { width:min(700px,100%);background:var(--color-background,#101018);border:1px solid var(--color-border);border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,0.5); }
+        #compare-modal .cmp-head { display:flex;justify-content:space-between;align-items:center;padding:13px 16px;border-bottom:1px solid var(--color-border); }
+        #compare-modal .cmp-close { background:transparent;border:1px solid var(--color-border);color:var(--color-text-muted);font-size:14px;cursor:pointer;border-radius:8px;padding:5px 10px; }
+        #compare-modal .cmp-body { padding:14px 16px 20px; }
+        #compare-modal .cmp-scores { display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap; }
+        #compare-modal .cmp-score-box { flex:1;min-width:120px;text-align:center;padding:10px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:10px; }
+        #compare-modal .cmp-score-box.me { border-color:rgba(201,168,76,0.4); }
+        #compare-modal .cmp-section-title { font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;margin:12px 0 6px;display:flex;align-items:center;gap:6px; }
+        #compare-modal table.cmp-t { width:100%;border-collapse:collapse;font-size:12px; }
+        #compare-modal table.cmp-t th { font-size:10px;color:var(--color-text-muted);font-weight:500;padding:3px 6px;border-bottom:1px solid var(--color-border); }
+        #compare-modal table.cmp-t td { padding:4px 6px;border-bottom:1px solid rgba(255,255,255,0.04); }
+        #compare-modal table.cmp-t tr:last-child td { border-bottom:none; }
+        #compare-modal .cmp-net-5 { color:#C9A84C;font-weight:700; }
+        #compare-modal .cmp-net-pos { color:#4ade80;font-weight:600; }
+        #compare-modal .cmp-net-0 { color:var(--color-text-muted); }
+        #compare-modal .cmp-alert { padding:10px 12px;border-radius:8px;font-size:12px;margin-bottom:10px; }
+        #compare-modal .cmp-alert.good { background:rgba(74,222,128,0.08);border:1px solid rgba(74,222,128,0.2);color:#4ade80; }
+        #compare-modal .cmp-alert.warn { background:rgba(251,191,36,0.08);border:1px solid rgba(251,191,36,0.2);color:#fbbf24; }
+        #compare-modal .cmp-alert.bad { background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.2);color:#f87171; }
+      </style>
+      <div class="cmp-panel">
+        <div class="cmp-head">
+          <div style="font-weight:700;font-size:15px">⚔️ Tú vs <span style="color:var(--color-primary)">${rivalName}</span></div>
+          <button class="cmp-close" onclick="document.getElementById('compare-modal').remove()">✕ Cerrar</button>
+        </div>
+        <div class="cmp-body" id="compare-content">
+          <div style="text-align:center;color:var(--color-text-muted);padding:2rem">Calculando...</div>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+    modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+
+    const container = document.getElementById('compare-content');
+    try {
+      const data = await this.api(`/users/${rivalId}/compare`);
+      const { me, rival, gap, canCatchUp, gold, silver, neutral, totalPending } = data;
+
+      const alertClass = gap <= 0 ? 'good' : canCatchUp ? 'warn' : 'bad';
+      const alertMsg = gap <= 0
+        ? `🎉 Ya le vas ganando por ${Math.abs(gap)} pts.`
+        : canCatchUp
+        ? `⚠️ Te lleva ${gap} pts. Puedes alcanzarlo si salen tus exactos — máxima ganancia neta posible: ${gold.length * 5 + silver.reduce((s,m) => s+m.net_gain,0)} pts.`
+        : `❌ Te lleva ${gap} pts y matemáticamente es difícil alcanzarlo solo con grupos.`;
+
+      const renderTable = (matches, emptyMsg) => {
+        if (!matches.length) return `<div style="font-size:12px;color:var(--color-text-muted);padding:6px 0">${emptyMsg}</div>`;
+        return `<table class="cmp-t">
+          <thead><tr><th>Partido</th><th style="text-align:center">Mi pred</th><th style="text-align:center">Su pred</th><th style="text-align:right">Si sale el mío</th></tr></thead>
+          <tbody>${matches.map(m => `<tr>
+            <td style="white-space:nowrap">${m.home_flag} ${m.home_name} <span style="color:var(--color-text-muted);font-size:10px">vs</span> ${m.away_flag} ${m.away_name}</td>
+            <td style="text-align:center;font-weight:600">${m.my_pred}</td>
+            <td style="text-align:center;color:var(--color-text-muted)">${m.rival_pred}</td>
+            <td style="text-align:right" class="${m.net_gain === 5 ? 'cmp-net-5' : m.net_gain > 0 ? 'cmp-net-pos' : 'cmp-net-0'}">Yo +5 · Él +${m.rival_pts} <strong>(+${m.net_gain})</strong></td>
+          </tr>`).join('')}</tbody>
+        </table>`;
+      };
+
+      container.innerHTML = `
+        <div class="cmp-scores">
+          <div class="cmp-score-box me">
+            <div style="font-size:11px;color:var(--color-text-muted)">Tú</div>
+            <div style="font-size:22px;font-weight:700;color:var(--color-primary)">${me.points}</div>
+            <div style="font-size:10px;color:var(--color-text-muted)">pts actuales</div>
+          </div>
+          <div style="display:flex;align-items:center;font-size:20px;color:var(--color-text-muted)">⚔️</div>
+          <div class="cmp-score-box">
+            <div style="font-size:11px;color:var(--color-text-muted)">${rival.display_name.split(' ')[0]}</div>
+            <div style="font-size:22px;font-weight:700">${rival.points}</div>
+            <div style="font-size:10px;color:var(--color-text-muted)">pts actuales</div>
+          </div>
+        </div>
+        <div class="cmp-alert ${alertClass}">${alertMsg}</div>
+        <div class="cmp-section-title" style="color:#C9A84C">🏆 Partidos de oro — Si sale mi exacto: yo +5, él 0 (${gold.length})</div>
+        ${renderTable(gold, 'No hay partidos donde solo tú sumes 5.')}
+        <div class="cmp-section-title" style="color:#4ade80">📈 Ventaja parcial — Si sale mi exacto: yo +5, él algo menos (${silver.length})</div>
+        ${renderTable(silver, 'No hay partidos con ventaja parcial.')}
+        <div class="cmp-section-title" style="color:var(--color-text-muted)">🤝 Pronóstico idéntico — No mueve la brecha (${neutral.length})</div>
+        ${renderTable(neutral, 'Sin pronósticos idénticos.')}
+        <div style="font-size:11px;color:var(--color-text-muted);margin-top:10px;padding-top:8px;border-top:1px solid var(--color-border)">
+          Análisis basado en ${totalPending} partidos pendientes de fase de grupos. Los puntos de eliminatorias no están incluidos.
+        </div>`;
+    } catch(e) {
+      container.innerHTML = `<div style="color:var(--color-danger);padding:1rem">⚠️ ${e.message}</div>`;
     }
   },
 
@@ -1945,19 +2082,35 @@ const app = {
       const renderDailyTop = (daily) => {
         if (!daily?.hasData || !daily.top.length) return '';
         const date = daily.date ? new Date(daily.date + 'T12:00:00').toLocaleDateString('es-EC', { weekday:'long', day:'numeric', month:'long' }) : '';
-        const medals = ['🥇','🥈','🥉'];
-        const cards = daily.top.map((u, i) => `
-          <div style="display:flex;align-items:center;gap:6px;padding:4px 8px;background:var(--color-background-secondary);border:1px solid ${u.isGJ ? 'rgba(201,168,76,0.3)' : 'var(--color-border)'};border-radius:8px;font-size:11px">
-            <span>${medals[i]}</span>
-            <span style="font-weight:600;color:var(--color-text)">${u.display_name.split(' ')[0]}</span>
+        const winMedals = ['🥇','🥈','🥉'];
+        const loseMedals = ['😰','😓','😔'];
+
+        const winners = daily.top.map((u, i) => `
+          <div style="display:flex;align-items:center;gap:5px;font-size:11px;padding:2px 0">
+            <span>${winMedals[i]}</span>
+            <span style="font-weight:600">${u.display_name.split(' ')[0]}</span>
             <span style="font-weight:700;color:var(--color-primary)">${u.pts}pts</span>
-            ${u.exactos > 0 ? `<span style="color:var(--color-text-muted)">🎯${u.exactos}</span>` : ''}
-            ${u.isGJ ? '<span style="color:#C9A84C;font-weight:700">⭐GJ</span>' : ''}
+            ${u.exactos > 0 ? `<span style="color:var(--color-text-muted);font-size:10px">🎯${u.exactos}</span>` : ''}
+            ${u.isGJ ? '<span style="color:#C9A84C;font-size:10px;font-weight:700">⭐GJ</span>' : ''}
           </div>`).join('');
+
+        const losers = (daily.bottom || []).map((u, i) => `
+          <div style="display:flex;align-items:center;gap:5px;font-size:11px;padding:2px 0">
+            <span>${loseMedals[i]}</span>
+            <span style="font-weight:600;color:var(--color-text-muted)">${u.display_name.split(' ')[0]}</span>
+            <span style="font-weight:700;color:var(--color-text-muted)">${u.pts}pts</span>
+          </div>`).join('');
+
         return `
-          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:7px 10px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:8px;margin-bottom:10px">
-            <span style="font-size:10px;font-weight:700;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:0.5px;white-space:nowrap">⭐ Jornada anterior · ${date}</span>
-            ${cards}
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
+            <div style="padding:8px 10px;background:var(--color-surface);border:1px solid rgba(201,168,76,0.2);border-radius:8px">
+              <div style="font-size:10px;font-weight:700;color:#C9A84C;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:5px">⭐ Jornada anterior · ${date}</div>
+              ${winners}
+            </div>
+            <div style="padding:8px 10px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:8px">
+              <div style="font-size:10px;font-weight:700;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:5px">🔒 El Calabozo</div>
+              ${losers || '<div style="font-size:11px;color:var(--color-text-muted)">Sin datos</div>'}
+            </div>
           </div>`;
       };
 
@@ -2007,6 +2160,7 @@ const app = {
                   <td style="text-align:right">
                     <span style="font-weight:700;font-size:15px">${u.points}</span>
                     <button title="Ver detalle de puntos" onclick="app.showPointsBreakdown(${uid},'${u.display_name.replace(/'/g, "\\'")}')" style="margin-left:6px;font-size:11px;padding:2px 7px;border:1px solid var(--color-border);border-radius:6px;background:transparent;color:var(--color-text-muted);cursor:pointer;vertical-align:middle">Ver</button>
+                    ${uid !== this.user.id ? `<button title="Compararme con ${u.display_name.replace(/'/g,"\\'")}" onclick="app.showCompare(${uid},'${u.display_name.replace(/'/g,"\\'")}')" style="margin-left:4px;font-size:11px;padding:2px 7px;border:1px solid rgba(201,168,76,0.4);border-radius:6px;background:transparent;color:#C9A84C;cursor:pointer;vertical-align:middle">⚔️</button>` : ''}
                   </td>
                 </tr>`;
               }).join('')}
