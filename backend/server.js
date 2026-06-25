@@ -723,7 +723,84 @@ app.get('/api/users/:id/points-breakdown', authMiddleware, (req, res) => {
   res.json({ user: targetUser, matches: rows });
 });
 
-// Top del día anterior — puntos acumulados por cada usuario en partidos de ayer (ECU UTC-5)
+// Comparación entre el usuario logueado y otro: partidos pendientes donde el logueado gana 5 y el rival no
+app.get('/api/users/:id/compare', authMiddleware, (req, res) => {
+  const myId = req.user.id;
+  const rivalId = parseInt(req.params.id);
+  if (myId === rivalId) return res.status(400).json({ error: 'No puedes compararte contigo mismo' });
+
+  const rivalUser = db.prepare('SELECT id, display_name FROM users WHERE id = ?').get(rivalId);
+  if (!rivalUser) return res.status(404).json({ error: 'Usuario no encontrado' });
+
+  // Mis puntos actuales vs los del rival
+  const myStats = calcUserTotalPoints(db, myId);
+  const rivalStats = calcUserTotalPoints(db, rivalId);
+
+  // Partidos pendientes con ambos pronósticos
+  const pending = db.prepare(`
+    SELECT m.id, m.home_team, m.away_team, m.group_name, m.phase, m.match_date
+    FROM matches m
+    WHERE m.home_score IS NULL AND m.phase = 'groups'
+    ORDER BY m.match_date, m.id
+  `).all();
+
+  const teamMap = Object.fromEntries(db.prepare('SELECT * FROM teams').all().map(t => [t.code, t]));
+
+  const analysis = pending.map(m => {
+    const myPred = db.prepare('SELECT pred_home, pred_away FROM predictions WHERE user_id=? AND match_id=?').get(myId, m.id);
+    const rivalPred = db.prepare('SELECT pred_home, pred_away FROM predictions WHERE user_id=? AND match_id=?').get(rivalId, m.id);
+    if (!myPred || myPred.pred_home == null) return null;
+
+    // Simular qué pasa si sale MI exacto
+    const simH = parseInt(myPred.pred_home), simA = parseInt(myPred.pred_away);
+
+    const myPts = 5; // si sale mi exacto, yo siempre saco 5
+    let rivalPts = 0;
+    if (rivalPred && rivalPred.pred_home != null) {
+      const rph = parseInt(rivalPred.pred_home), rpa = parseInt(rivalPred.pred_away);
+      if (rph === simH && rpa === simA) rivalPts = 5;
+      else {
+        const pr = rph > rpa ? 'H' : rph < rpa ? 'A' : 'D';
+        const rr = simH > simA ? 'H' : simH < simA ? 'A' : 'D';
+        if (pr === rr) rivalPts = Math.abs(rph-rpa) === Math.abs(simH-simA) ? 3 : 2;
+      }
+    }
+
+    return {
+      match_id: m.id,
+      group_name: m.group_name,
+      match_date: m.match_date,
+      home_flag: teamMap[m.home_team]?.flag || '?',
+      away_flag: teamMap[m.away_team]?.flag || '?',
+      home_name: teamMap[m.home_team]?.name || m.home_team,
+      away_name: teamMap[m.away_team]?.name || m.away_team,
+      my_pred: `${myPred.pred_home}-${myPred.pred_away}`,
+      rival_pred: (rivalPred && rivalPred.pred_home != null) ? `${rivalPred.pred_home}-${rivalPred.pred_away}` : '–',
+      my_pts: myPts,
+      rival_pts: rivalPts,
+      net_gain: myPts - rivalPts  // ganancia neta vs el rival si sale mi exacto
+    };
+  }).filter(Boolean);
+
+  // Clasificar por impacto
+  const gold = analysis.filter(m => m.net_gain === 5);   // yo 5, rival 0
+  const silver = analysis.filter(m => m.net_gain > 0 && m.net_gain < 5); // yo 5, rival algo
+  const neutral = analysis.filter(m => m.net_gain === 0); // ambos 5 (mismo exacto)
+
+  const gap = rivalStats.total - myStats.total;
+  const maxGainIfAllGold = gold.length * 5 + silver.reduce((s, m) => s + m.net_gain, 0);
+
+  res.json({
+    me: { id: myId, points: myStats.total },
+    rival: { id: rivalId, display_name: rivalUser.display_name, points: rivalStats.total },
+    gap,
+    canCatchUp: maxGainIfAllGold >= gap,
+    gold,      // partidos donde si sale mi exacto, rival saca 0 — máxima ganancia neta +5
+    silver,    // partidos donde si sale mi exacto, rival saca algo pero yo más — ganancia +2 o +3
+    neutral,   // mismo pronóstico exacto — no mueve la brecha
+    totalPending: analysis.length
+  });
+});
 app.get('/api/leaderboard/daily-top', authMiddleware, (req, res) => {
   // "Ayer" en hora Ecuador (UTC-5): restar 5h al UTC actual y tomar la fecha
   const nowECU = new Date(Date.now() - 5 * 60 * 60 * 1000);
@@ -769,7 +846,10 @@ app.get('/api/leaderboard/daily-top', authMiddleware, (req, res) => {
   }));
   const gjIds = new Set(daily.filter(u => u.pts === maxPts).map(u => u.user_id));
 
-  res.json({ date: yesterday, top: top3, gjIds: [...gjIds], hasData: true, matchCount: matchesYesterday.length });
+  // El Calabozo: los 3 que menos sumaron ese día (entre los que tienen pronóstico)
+  const bottom3 = [...daily].reverse().slice(0, 3).map((u, i) => ({ ...u, bottomRank: i + 1 }));
+
+  res.json({ date: yesterday, top: top3, gjIds: [...gjIds], bottom: bottom3, hasData: true, matchCount: matchesYesterday.length });
 });
 
 // ─── POLLAS — INSCRIPCIONES ──────────────────────────────────────────────────
