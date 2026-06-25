@@ -345,12 +345,63 @@ const app = {
 
     // ── Grupos HTML unificado: resultado real + mi pronóstico lado a lado
     const myPredsByMatch = this.predictions || {};
+
+    // Calcular posiciones de cada grupo SEGÚN MIS PRONÓSTICOS
+    const myGroups = {};
+    groupMatches.forEach(m => {
+      if (!myGroups[m.group_name]) myGroups[m.group_name] = {};
+      [m.home_team, m.away_team].forEach(code => {
+        if (code && !myGroups[m.group_name][code]) {
+          const t = this.teamByCode(code);
+          myGroups[m.group_name][code] = { code, name: t.name, flag: t.flag, pts: 0, pj: 0, gf: 0, ga: 0, gd: 0 };
+        }
+      });
+      const pred = myPredsByMatch[m.id];
+      if (pred && pred.pred_home != null && m.home_team && m.away_team) {
+        const h = myGroups[m.group_name][m.home_team];
+        const a = myGroups[m.group_name][m.away_team];
+        if (h && a) {
+          const ph = parseInt(pred.pred_home), pa = parseInt(pred.pred_away);
+          h.pj++; a.pj++;
+          h.gf += ph; h.ga += pa;
+          a.gf += pa; a.ga += ph;
+          h.gd = h.gf - h.ga; a.gd = a.gf - a.ga;
+          if (ph > pa) h.pts += 3;
+          else if (pa > ph) a.pts += 3;
+          else { h.pts += 1; a.pts += 1; }
+        }
+      }
+    });
+    const mySortedGroups = {};
+    for (const [g, teams] of Object.entries(myGroups)) {
+      mySortedGroups[g] = Object.values(teams).sort((a, b) =>
+        b.pts !== a.pts ? b.pts - a.pts : b.gd !== a.gd ? b.gd - a.gd : b.gf - a.gf
+      );
+    }
+
+    const miniStandingTable = (standing, isPred) => `
+      <table class="fixture-group-table">
+        <thead><tr><th></th><th>Equipo</th><th>PJ</th><th>Pts</th><th>GD</th></tr></thead>
+        <tbody>
+          ${standing.map((t, i) => `
+            <tr class="${i < 2 ? 'classified' : ''}">
+              <td style="font-size:10px;color:var(--color-text-muted)">${i+1}</td>
+              <td style="font-size:11px"><span style="margin-right:3px">${t.flag}</span>${t.name}</td>
+              <td style="text-align:center;font-size:11px">${t.pj}</td>
+              <td style="text-align:center;font-size:11px;font-weight:${i<2?'700':'400'}">${t.pts}</td>
+              <td style="text-align:center;font-size:11px">${t.gd > 0 ? '+' : ''}${t.gd}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>`;
+
     const groupsHtml = Object.keys(sortedGroups).sort().map(g => {
       const standing = sortedGroups[g];
+      const myStanding = mySortedGroups[g] || [];
       const color = groupColors[g] || '#C9A84C';
       const gMatches = groupMatches.filter(m => m.group_name === g);
 
-      // Tabla comparativa de partidos: resultado real vs mi pronóstico
+      // Filas de partidos con columnas alineadas vía <colgroup>
       const matchRows = gMatches.map(m => {
         const home = this.teamByCode(m.home_team);
         const away = this.teamByCode(m.away_team);
@@ -360,9 +411,7 @@ const app = {
         const realStr = hasResult ? `${m.home_score}-${m.away_score}` : '–';
         const predStr = hasPred ? `${pred.pred_home}-${pred.pred_away}` : '–';
 
-        // Calcular puntos obtenidos si hay resultado
-        let pts = null;
-        let ptsColor = 'var(--color-text-muted)';
+        let pts = null, ptsColor = 'var(--color-text-muted)';
         if (hasResult && hasPred) {
           const ph = parseInt(pred.pred_home), pa = parseInt(pred.pred_away);
           const rh = parseInt(m.home_score), ra = parseInt(m.away_score);
@@ -370,54 +419,55 @@ const app = {
           else {
             const pr = ph > pa ? 'H' : ph < pa ? 'A' : 'D';
             const rr = rh > ra ? 'H' : rh < ra ? 'A' : 'D';
-            if (pr !== rr) { pts = 0; ptsColor = 'var(--color-text-muted)'; }
+            if (pr !== rr) { pts = 0; }
             else if (Math.abs(ph-pa) === Math.abs(rh-ra)) { pts = 3; ptsColor = '#60a5fa'; }
             else { pts = 2; ptsColor = '#4ade80'; }
           }
         }
 
-        return `<tr style="${!hasResult ? 'opacity:0.7' : ''}">
-          <td style="font-size:11px;white-space:nowrap">${home.flag} ${home.name}</td>
-          <td style="text-align:center;font-size:11px;padding:2px 4px">
-            <span style="background:var(--color-background-secondary);border-radius:4px;padding:1px 5px;font-weight:600">${realStr}</span>
+        return `<tr style="${!hasResult ? 'opacity:0.75' : ''}">
+          <td style="font-size:11px;text-align:right;white-space:nowrap;padding:3px 4px">${home.name} ${home.flag}</td>
+          <td style="text-align:center;padding:3px 4px">
+            <span style="background:var(--color-background-secondary);border-radius:4px;padding:1px 6px;font-weight:600;font-size:11px">${realStr}</span>
           </td>
-          <td style="text-align:center;font-size:11px;padding:2px 4px">
-            <span style="background:${hasPred ? 'rgba(255,255,255,0.06)' : 'transparent'};border-radius:4px;padding:1px 5px;color:${hasPred ? 'var(--color-text)' : 'var(--color-text-muted)'}">${predStr}</span>
+          <td style="text-align:center;padding:3px 4px">
+            <span style="background:${hasPred ? 'rgba(255,255,255,0.06)' : 'transparent'};border-radius:4px;padding:1px 6px;font-size:11px;color:${hasPred ? 'var(--color-text)' : 'var(--color-text-muted)'}">${predStr}</span>
           </td>
-          <td style="text-align:right;font-size:11px;font-weight:700;color:${ptsColor};white-space:nowrap">${pts !== null ? (pts > 0 ? '+'+pts : '✗') : ''}</td>
-          <td style="font-size:11px;white-space:nowrap;text-align:right">${away.name} ${away.flag}</td>
+          <td style="text-align:center;font-size:11px;font-weight:700;color:${ptsColor};padding:3px 4px">${pts !== null ? (pts > 0 ? '+'+pts : '✗') : '·'}</td>
+          <td style="font-size:11px;text-align:left;white-space:nowrap;padding:3px 4px">${away.flag} ${away.name}</td>
         </tr>`;
       }).join('');
 
       return `
         <div class="fixture-group-card" style="border-left:3px solid ${color}">
           <div class="fixture-group-title" style="color:${color}">Grupo ${g}</div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+          <div class="fgc-standings">
             <div>
-              <div style="font-size:9px;font-weight:700;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Real</div>
-              <table class="fixture-group-table">
-                <thead><tr><th></th><th>Equipo</th><th>PJ</th><th>Pts</th><th>GD</th></tr></thead>
-                <tbody>
-                  ${standing.map((t, i) => `
-                    <tr class="${i < 2 ? 'classified' : ''}">
-                      <td style="font-size:11px;color:var(--color-text-muted)">${i+1}</td>
-                      <td><span style="margin-right:4px">${t.flag}</span>${t.name}</td>
-                      <td style="text-align:center">${t.pj}</td>
-                      <td style="text-align:center;font-weight:${i<2?'700':'400'}">${t.pts}</td>
-                      <td style="text-align:center">${t.gd > 0 ? '+' : ''}${t.gd}</td>
-                    </tr>
-                  `).join('')}
-                </tbody>
-              </table>
+              <div class="fgc-label">📊 Posiciones reales</div>
+              ${miniStandingTable(standing, false)}
+            </div>
+            <div>
+              <div class="fgc-label">🎯 Según mi pronóstico</div>
+              ${miniStandingTable(myStanding, true)}
             </div>
           </div>
-          <div style="font-size:9px;font-weight:700;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;display:flex;justify-content:space-between">
-            <span>Partidos</span>
-            <span style="display:flex;gap:20px"><span>Real</span><span>Mi pred</span><span>Pts</span></span>
+          <div class="fgc-matches-wrap">
+            <table class="fgc-matches">
+              <colgroup>
+                <col style="width:32%"><col style="width:16%"><col style="width:16%"><col style="width:10%"><col style="width:26%">
+              </colgroup>
+              <thead>
+                <tr>
+                  <th style="text-align:right">Local</th>
+                  <th style="text-align:center">Real</th>
+                  <th style="text-align:center">Mi pred</th>
+                  <th style="text-align:center">Pts</th>
+                  <th style="text-align:left">Visitante</th>
+                </tr>
+              </thead>
+              <tbody>${matchRows}</tbody>
+            </table>
           </div>
-          <table style="width:100%;border-collapse:collapse">
-            <tbody>${matchRows}</tbody>
-          </table>
         </div>`;
     }).join('');
 
@@ -489,20 +539,33 @@ const app = {
         .fixture-tab-content.active { display:block; }
 
         /* ── Grupos grid ── */
-        .fixture-groups-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
-        @media(max-width:500px){ .fixture-groups-grid{ grid-template-columns:1fr; } }
+        .fixture-groups-grid { display:grid; grid-template-columns:1fr; gap:12px; }
+        @media(min-width:900px){ .fixture-groups-grid{ grid-template-columns:1fr 1fr; } }
         .fixture-group-card {
           background:var(--color-surface); border:1px solid var(--color-border);
-          border-radius:var(--radius-md); padding:8px;
+          border-radius:var(--radius-md); padding:10px;
           transition:transform 0.2s, box-shadow 0.2s;
         }
         .fixture-group-card:hover { transform:translateY(-1px); box-shadow:0 4px 12px rgba(0,0,0,0.3); }
-        .fixture-group-title { font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:6px; }
+        .fixture-group-title { font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px; }
         .fixture-group-table { width:100%; border-collapse:collapse; font-size:12px; }
         .fixture-group-table th { font-size:10px; color:var(--color-text-muted); font-weight:500; padding:2px 4px; text-align:left; }
         .fixture-group-table td { padding:3px 4px; color:var(--color-text); white-space:nowrap; }
         .fixture-group-table tr.classified { background:rgba(255,255,255,0.04); }
         .fixture-group-table tr.classified td:nth-child(2) { font-weight:600; }
+
+        /* ── Grupo unificado: dos tablas de posiciones + partidos ── */
+        .fgc-standings { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px; }
+        .fgc-label { font-size:9px; font-weight:700; color:var(--color-text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px; }
+        .fgc-matches-wrap { overflow-x:auto; }
+        .fgc-matches { width:100%; border-collapse:collapse; }
+        .fgc-matches th { font-size:9px; color:var(--color-text-muted); font-weight:600; text-transform:uppercase; letter-spacing:0.3px; padding:4px; border-bottom:1px solid var(--color-border); }
+        .fgc-matches td { color:var(--color-text); }
+        @media(max-width:480px){
+          .fgc-standings { grid-template-columns:1fr; gap:8px; }
+          .fgc-matches { min-width:300px; }
+        }
+
 
         /* ── Tarjeta de partido bracket ── */
         .bk-match {
@@ -902,6 +965,16 @@ const app = {
         #compare-modal table.cmp-t th { font-size:10px;color:var(--color-text-muted);font-weight:500;padding:3px 6px;border-bottom:1px solid var(--color-border); }
         #compare-modal table.cmp-t td { padding:4px 6px;border-bottom:1px solid rgba(255,255,255,0.04); }
         #compare-modal table.cmp-t tr:last-child td { border-bottom:none; }
+        #compare-modal .cmp-matches { display:flex; flex-direction:column; gap:4px; }
+        #compare-modal .cmp-match-row { padding:6px 8px; background:var(--color-surface); border:1px solid var(--color-border); border-radius:8px; }
+        #compare-modal .cmp-match-teams { font-size:12px; margin-bottom:4px; }
+        #compare-modal .cmp-match-data { display:flex; align-items:center; gap:10px; flex-wrap:wrap; font-size:11px; }
+        #compare-modal .cmp-pred-pair { display:inline-flex; align-items:center; gap:3px; }
+        #compare-modal .cmp-net { margin-left:auto; white-space:nowrap; }
+        @media(max-width:480px){
+          #compare-modal .cmp-match-data { gap:8px; }
+          #compare-modal .cmp-net { margin-left:0; width:100%; padding-top:2px; }
+        }
         #compare-modal .cmp-net-5 { color:#C9A84C;font-weight:700; }
         #compare-modal .cmp-net-pos { color:#4ade80;font-weight:600; }
         #compare-modal .cmp-net-0 { color:var(--color-text-muted); }
@@ -936,15 +1009,15 @@ const app = {
 
       const renderTable = (matches, emptyMsg) => {
         if (!matches.length) return `<div style="font-size:12px;color:var(--color-text-muted);padding:6px 0">${emptyMsg}</div>`;
-        return `<table class="cmp-t">
-          <thead><tr><th>Partido</th><th style="text-align:center">Mi pred</th><th style="text-align:center">Su pred</th><th style="text-align:right">Si sale el mío</th></tr></thead>
-          <tbody>${matches.map(m => `<tr>
-            <td style="white-space:nowrap">${m.home_flag} ${m.home_name} <span style="color:var(--color-text-muted);font-size:10px">vs</span> ${m.away_flag} ${m.away_name}</td>
-            <td style="text-align:center;font-weight:600">${m.my_pred}</td>
-            <td style="text-align:center;color:var(--color-text-muted)">${m.rival_pred}</td>
-            <td style="text-align:right" class="${m.net_gain === 5 ? 'cmp-net-5' : m.net_gain > 0 ? 'cmp-net-pos' : 'cmp-net-0'}">Yo +5 · Él +${m.rival_pts} <strong>(+${m.net_gain})</strong></td>
-          </tr>`).join('')}</tbody>
-        </table>`;
+        return `<div class="cmp-matches">${matches.map(m => `
+          <div class="cmp-match-row">
+            <div class="cmp-match-teams">${m.home_flag} ${m.home_name} <span style="color:var(--color-text-muted);font-size:10px">vs</span> ${m.away_flag} ${m.away_name}</div>
+            <div class="cmp-match-data">
+              <span class="cmp-pred-pair"><span style="color:var(--color-text-muted);font-size:10px">Yo</span> <strong>${m.my_pred}</strong></span>
+              <span class="cmp-pred-pair"><span style="color:var(--color-text-muted);font-size:10px">Él</span> ${m.rival_pred}</span>
+              <span class="cmp-net ${m.net_gain === 5 ? 'cmp-net-5' : m.net_gain > 0 ? 'cmp-net-pos' : 'cmp-net-0'}">+5/+${m.rival_pts} <strong>(+${m.net_gain})</strong></span>
+            </div>
+          </div>`).join('')}</div>`;
       };
 
       container.innerHTML = `
@@ -2153,14 +2226,13 @@ const app = {
                 const wn = u.winnerCount ?? 0;
                 return `<tr style="${isMe ? 'background:rgba(201,168,76,0.06)' : ''}">
                   <td><span class="rank-medal ${medal}">${rank}</span></td>
-                  <td class="user-cell"><span class="avatar">${init}</span><span>${u.display_name}${isMe ? ' <strong>(tú)</strong>' : ''}${gjIds.has(uid) ? ' <span title="Ganador de la Jornada" style="font-size:11px;background:rgba(201,168,76,0.15);color:#C9A84C;border:1px solid rgba(201,168,76,0.3);border-radius:10px;padding:1px 6px;margin-left:4px">⭐ GJ</span>' : ''}</span><button title="Ver pronósticos" onclick="app.showUserPredictions(${uid})" style="margin-left:8px;font-size:12px;padding:2px 8px;border:1px solid var(--color-border);border-radius:6px;background:transparent;color:var(--color-text-muted);cursor:pointer;flex-shrink:0">👁</button></td>
+                  <td class="user-cell"><span class="avatar">${init}</span><span>${u.display_name}${isMe ? ' <strong>(tú)</strong>' : ''}${gjIds.has(uid) ? ' <span title="Ganador de la Jornada" style="font-size:11px;background:rgba(201,168,76,0.15);color:#C9A84C;border:1px solid rgba(201,168,76,0.3);border-radius:10px;padding:1px 6px;margin-left:4px">⭐ GJ</span>' : ''}</span>${uid !== this.user.id ? `<button title="Compararme con ${u.display_name.replace(/'/g,"\\'")}" onclick="app.showCompare(${uid},'${u.display_name.replace(/'/g,"\\'")}')" style="margin-left:6px;font-size:12px;padding:2px 8px;border:1px solid rgba(201,168,76,0.4);border-radius:6px;background:transparent;color:#C9A84C;cursor:pointer;flex-shrink:0">⚔️</button>` : ''}<button title="Ver pronósticos" onclick="app.showUserPredictions(${uid})" style="margin-left:4px;font-size:12px;padding:2px 8px;border:1px solid var(--color-border);border-radius:6px;background:transparent;color:var(--color-text-muted);cursor:pointer;flex-shrink:0">👁</button></td>
                   <td style="text-align:center;font-weight:600;color:var(--color-primary)">${ex}</td>
                   <td style="text-align:center">${df}</td>
                   <td style="text-align:center">${wn}</td>
                   <td style="text-align:right">
                     <span style="font-weight:700;font-size:15px">${u.points}</span>
                     <button title="Ver detalle de puntos" onclick="app.showPointsBreakdown(${uid},'${u.display_name.replace(/'/g, "\\'")}')" style="margin-left:6px;font-size:11px;padding:2px 7px;border:1px solid var(--color-border);border-radius:6px;background:transparent;color:var(--color-text-muted);cursor:pointer;vertical-align:middle">Ver</button>
-                    ${uid !== this.user.id ? `<button title="Compararme con ${u.display_name.replace(/'/g,"\\'")}" onclick="app.showCompare(${uid},'${u.display_name.replace(/'/g,"\\'")}')" style="margin-left:4px;font-size:11px;padding:2px 7px;border:1px solid rgba(201,168,76,0.4);border-radius:6px;background:transparent;color:#C9A84C;cursor:pointer;vertical-align:middle">⚔️</button>` : ''}
                   </td>
                 </tr>`;
               }).join('')}
