@@ -322,24 +322,54 @@ const app = {
       I:'#9d174d', J:'#065f46', K:'#7c2d12', L:'#164e63'
     };
 
-    // ── Tarjeta de partido para bracket
+    // ── Tarjeta de partido para bracket: muestra cruce REAL + mi predicción de ganador
+    const myPreds = this.predictions || {};
     const matchCard = (m) => {
       if (!m) return `<div class="bk-match empty">?</div>`;
       const home = m.home_team ? this.teamByCode(m.home_team) : null;
       const away = m.away_team ? this.teamByCode(m.away_team) : null;
       const hasResult = m.home_score != null;
       const wc = m.winner;
-      return `<div class="bk-match${hasResult ? ' played' : ''}">
-        <div class="bk-team ${wc === m.home_team ? 'winner' : hasResult ? 'loser' : ''}">
-          <span class="bk-flag">${home?.flag || '?'}</span>
-          <span class="bk-name">${home?.name || '?'}</span>
-          ${hasResult ? `<span class="bk-score">${m.home_score}${m.pen_home != null ? `(${m.pen_home})` : ''}</span>` : ''}
-        </div>
-        <div class="bk-team ${wc === m.away_team ? 'winner' : hasResult ? 'loser' : ''}">
-          <span class="bk-flag">${away?.flag || '?'}</span>
-          <span class="bk-name">${away?.name || '?'}</span>
-          ${hasResult ? `<span class="bk-score">${m.away_score}${m.pen_away != null ? `(${m.pen_away})` : ''}</span>` : ''}
-        </div>
+      const bothDefined = m.home_team && m.away_team;
+
+      // Mi predicción para ESTE cruce real
+      const pred = myPreds[m.id];
+      let myPick = null; // código del equipo que predije como ganador
+      if (pred && bothDefined) {
+        const ph = pred.pred_home != null ? parseInt(pred.pred_home) : null;
+        const pa = pred.pred_away != null ? parseInt(pred.pred_away) : null;
+        if (ph != null && pa != null) {
+          if (ph > pa) myPick = m.home_team;
+          else if (pa > ph) myPick = m.away_team;
+          else myPick = pred.pred_winner || null; // empate → ganador por penales
+        } else if (pred.pred_winner) {
+          myPick = pred.pred_winner;
+        }
+      }
+      const myScore = (pred && pred.pred_home != null) ? `${pred.pred_home}-${pred.pred_away}` : null;
+
+      // Marca de acierto si ya hay resultado
+      let pickResult = ''; // 'hit' | 'miss' | ''
+      if (hasResult && myPick && wc) {
+        pickResult = myPick === wc ? 'hit' : 'miss';
+      }
+
+      const teamRow = (team, code, scoreVal, penVal) => {
+        const isRealWinner = wc === code;
+        const isMyPick = myPick === code;
+        const cls = isRealWinner ? 'winner' : (hasResult ? 'loser' : '');
+        return `<div class="bk-team ${cls}${isMyPick ? ' mypick' : ''}">
+          <span class="bk-flag">${team?.flag || '?'}</span>
+          <span class="bk-name">${team?.name || (bothDefined ? '?' : '???')}</span>
+          ${isMyPick ? '<span class="bk-pick-dot" title="Mi pronóstico de ganador">●</span>' : ''}
+          ${hasResult ? `<span class="bk-score">${scoreVal}${penVal != null ? `(${penVal})` : ''}</span>` : ''}
+        </div>`;
+      };
+
+      return `<div class="bk-match${hasResult ? ' played' : ''}${pickResult ? ' pick-'+pickResult : ''}">
+        ${teamRow(home, m.home_team, m.home_score, m.pen_home)}
+        ${teamRow(away, m.away_team, m.away_score, m.pen_away)}
+        ${myScore || myPick ? `<div class="bk-mypred">🎯 Mi pred: ${myScore ? myScore : (myPick ? this.teamByCode(myPick)?.name : '—')}${pickResult === 'hit' ? ' <span style="color:#4ade80">✓</span>' : pickResult === 'miss' ? ' <span style="color:#f87171">✗</span>' : ''}</div>` : ''}
       </div>`;
     };
 
@@ -574,14 +604,19 @@ const app = {
           transition:border-color 0.2s; margin-bottom:4px;
         }
         .bk-match.played { border-color:rgba(201,168,76,0.35); }
+        .bk-match.pick-hit { border-color:rgba(74,222,128,0.5); }
+        .bk-match.pick-miss { border-color:rgba(248,113,113,0.4); }
         .bk-match.empty { padding:8px; font-size:11px; color:var(--color-text-muted); font-style:italic; text-align:center; }
         .bk-team { display:flex; align-items:center; gap:5px; padding:4px 7px; font-size:11px; border-bottom:1px solid var(--color-border); }
         .bk-team:last-child { border-bottom:none; }
         .bk-team.winner { background:rgba(201,168,76,0.1); font-weight:700; color:var(--color-primary); }
         .bk-team.loser { opacity:0.4; }
+        .bk-team.mypick { box-shadow:inset 3px 0 0 #60a5fa; }
         .bk-flag { font-size:13px; flex-shrink:0; }
         .bk-name { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
         .bk-score { font-weight:700; font-size:12px; flex-shrink:0; }
+        .bk-pick-dot { color:#60a5fa; font-size:8px; flex-shrink:0; }
+        .bk-mypred { font-size:9px; color:var(--color-text-muted); padding:2px 7px; background:rgba(96,165,250,0.06); border-top:1px solid var(--color-border); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 
         /* ── Bracket pathway (siempre visible, scroll horizontal en mobile) ── */
         .pw-bracket {
@@ -667,6 +702,13 @@ const app = {
         <div class="fixture-groups-grid">${groupsHtml}</div>
       </div>
       <div class="fixture-tab-content ${this._fixtureTab === 'finals' ? 'active' : ''}" id="ftab-finals">
+        <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;font-size:11px;color:var(--color-text-muted);margin-bottom:8px;padding:6px 10px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:8px">
+          <span style="font-weight:700;color:var(--color-text)">Leyenda:</span>
+          <span><span style="display:inline-block;width:8px;height:8px;background:rgba(201,168,76,0.4);border-radius:2px;vertical-align:middle"></span> Ganador real</span>
+          <span><span style="color:#60a5fa">● </span>Mi pronóstico</span>
+          <span><span style="color:#4ade80">✓</span> Acerté · <span style="color:#f87171">✗</span> Fallé</span>
+          <span style="color:var(--color-text-muted)">??? = aún sin definir</span>
+        </div>
         <div class="pw-scroll-hint">← Desliza horizontalmente para ver el bracket completo →</div>
         <div class="pw-bracket-wrapper">${bracketDesktopHtml}</div>
       </div>
@@ -2665,7 +2707,12 @@ const app = {
   async renderAdminPollasConfig() {
     const container = document.getElementById('admin-pollas-config');
     try {
-      const s = await this.api('/settings');
+      const [s, ls] = await Promise.all([
+        this.api('/settings'),
+        this.api('/predictions/lock-status')
+      ]);
+      const p1Locked = ls.polla1Locked;
+      const p2Locked = ls.polla2Locked;
       container.innerHTML = `
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
           <div>
@@ -2725,7 +2772,7 @@ const app = {
           <div style="font-size:12px;font-weight:700;color:var(--color-primary);margin-bottom:10px">🔒 Control manual de bloqueo</div>
           <div style="display:grid;gap:8px">
             <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-              <span style="font-size:12px">⚽ Pronóstico 1 (Grupos) — Estado: <strong id="lock1-status">${arePolla1Locked ? '🔒 Bloqueado' : '🟢 Abierto'}</strong></span>
+              <span style="font-size:12px">⚽ Pronóstico 1 (Grupos) — Estado: <strong id="lock1-status">${p1Locked ? '🔒 Bloqueado' : '🟢 Abierto'}</strong></span>
               <div style="display:flex;gap:6px">
                 <button class="btn-sm" style="background:#166534;color:#fff;border:none;border-radius:4px;padding:4px 10px;cursor:pointer;font-size:11px" onclick="app.setPollaLock('polla1','unlock')">🔓 Abrir</button>
                 <button class="btn-sm" style="background:#991b1b;color:#fff;border:none;border-radius:4px;padding:4px 10px;cursor:pointer;font-size:11px" onclick="app.setPollaLock('polla1','lock')">🔒 Cerrar</button>
@@ -2733,7 +2780,7 @@ const app = {
               </div>
             </div>
             <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-              <span style="font-size:12px">🏆 Pronóstico 2 (Eliminatorias) — Estado: <strong id="lock2-status">${arePolla2Locked ? '🔒 Bloqueado' : '🟢 Abierto'}</strong></span>
+              <span style="font-size:12px">🏆 Pronóstico 2 (Eliminatorias) — Estado: <strong id="lock2-status">${p2Locked ? '🔒 Bloqueado' : '🟢 Abierto'}</strong></span>
               <div style="display:flex;gap:6px">
                 <button class="btn-sm" style="background:#166534;color:#fff;border:none;border-radius:4px;padding:4px 10px;cursor:pointer;font-size:11px" onclick="app.setPollaLock('polla2','unlock')">🔓 Abrir</button>
                 <button class="btn-sm" style="background:#991b1b;color:#fff;border:none;border-radius:4px;padding:4px 10px;cursor:pointer;font-size:11px" onclick="app.setPollaLock('polla2','lock')">🔒 Cerrar</button>
