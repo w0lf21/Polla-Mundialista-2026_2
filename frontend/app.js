@@ -354,11 +354,13 @@ const app = {
         pickResult = myPick === wc ? 'hit' : 'miss';
       }
 
-      const teamRow = (team, code, scoreVal, penVal) => {
+      const teamRow = (team, code, scoreVal, penVal, confirmed) => {
         const isRealWinner = wc === code;
         const isMyPick = myPick === code;
         const cls = isRealWinner ? 'winner' : (hasResult ? 'loser' : '');
-        return `<div class="bk-team ${cls}${isMyPick ? ' mypick' : ''}">
+        // Equipo aún no confirmado matemáticamente → gris opaco (provisional)
+        const provisional = bothDefined && confirmed === false && !hasResult;
+        return `<div class="bk-team ${cls}${isMyPick ? ' mypick' : ''}${provisional ? ' provisional' : ''}">
           <span class="bk-flag">${team?.flag || '?'}</span>
           <span class="bk-name">${team?.name || (bothDefined ? '?' : '???')}</span>
           ${isMyPick ? '<span class="bk-pick-dot" title="Mi pronóstico de ganador">●</span>' : ''}
@@ -367,8 +369,8 @@ const app = {
       };
 
       return `<div class="bk-match${hasResult ? ' played' : ''}${pickResult ? ' pick-'+pickResult : ''}">
-        ${teamRow(home, m.home_team, m.home_score, m.pen_home)}
-        ${teamRow(away, m.away_team, m.away_score, m.pen_away)}
+        ${teamRow(home, m.home_team, m.home_score, m.pen_home, m.home_confirmed)}
+        ${teamRow(away, m.away_team, m.away_score, m.pen_away, m.away_confirmed)}
         ${myScore || myPick ? `<div class="bk-mypred">🎯 Mi pred: ${myScore ? myScore : (myPick ? this.teamByCode(myPick)?.name : '—')}${pickResult === 'hit' ? ' <span style="color:#4ade80">✓</span>' : pickResult === 'miss' ? ' <span style="color:#f87171">✗</span>' : ''}</div>` : ''}
       </div>`;
     };
@@ -612,6 +614,8 @@ const app = {
         .bk-team.winner { background:rgba(201,168,76,0.1); font-weight:700; color:var(--color-primary); }
         .bk-team.loser { opacity:0.4; }
         .bk-team.mypick { box-shadow:inset 3px 0 0 #60a5fa; }
+        .bk-team.provisional { opacity:0.55; }
+        .bk-team.provisional .bk-name { color:var(--color-text-muted); font-style:italic; }
         .bk-flag { font-size:13px; flex-shrink:0; }
         .bk-name { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
         .bk-score { font-weight:700; font-size:12px; flex-shrink:0; }
@@ -707,7 +711,7 @@ const app = {
           <span><span style="display:inline-block;width:8px;height:8px;background:rgba(201,168,76,0.4);border-radius:2px;vertical-align:middle"></span> Ganador real</span>
           <span><span style="color:#60a5fa">● </span>Mi pronóstico</span>
           <span><span style="color:#4ade80">✓</span> Acerté · <span style="color:#f87171">✗</span> Fallé</span>
-          <span style="color:var(--color-text-muted)">??? = aún sin definir</span>
+          <span style="color:var(--color-text-muted)"><em>En gris</em> = aún sin confirmar matemáticamente · ??? = sin definir</span>
         </div>
         <div class="pw-scroll-hint">← Desliza horizontalmente para ver el bracket completo →</div>
         <div class="pw-bracket-wrapper">${bracketDesktopHtml}</div>
