@@ -339,7 +339,55 @@ app.get('/api/matches', (req, res) => {
   if (date)  { where.push('m.match_date = ?'); params.push(date); }
   if (where.length) query += ' WHERE ' + where.join(' AND ');
   query += ' ORDER BY m.match_date, m.match_time, m.id';
-  res.json(db.prepare(query).all(...params));
+  const matches = db.prepare(query).all(...params);
+
+  // ── Confirmación matemática de equipos en el bracket ──
+  // Un equipo de bracket es "confirmado" si el grupo del que sale ya terminó.
+  // Regla general (cualquier torneo): grupo cerrado = todos sus partidos jugados.
+  // Para terceros (cuyo ranking es cross-grupo), se exige que TODOS los grupos hayan cerrado.
+  const groupRows = db.prepare(`SELECT DISTINCT group_name FROM matches WHERE phase='groups' AND group_name IS NOT NULL`).all();
+  const groupClosed = {};
+  let allGroupsClosed = true;
+  for (const { group_name } of groupRows) {
+    const gMatches = db.prepare(`SELECT home_score FROM matches WHERE phase='groups' AND group_name=?`).all(group_name);
+    const closed = gMatches.length > 0 && gMatches.every(m => m.home_score != null);
+    groupClosed[group_name] = closed;
+    if (!closed) allGroupsClosed = false;
+  }
+
+  // Mapa: cada equipo (code) pertenece a qué grupo
+  const teamGroup = {};
+  db.prepare(`SELECT DISTINCT home_team, group_name FROM matches WHERE phase='groups' AND home_team IS NOT NULL`).all()
+    .forEach(r => { teamGroup[r.home_team] = r.group_name; });
+  db.prepare(`SELECT DISTINCT away_team, group_name FROM matches WHERE phase='groups' AND away_team IS NOT NULL`).all()
+    .forEach(r => { teamGroup[r.away_team] = r.group_name; });
+
+  // Determina si un equipo en una llave KO está confirmado.
+  // Si el equipo viene de una ronda KO previa (no de grupos), está confirmado solo si esa llave ya se jugó.
+  const koResultById = {};
+  matches.forEach(m => { if (m.phase !== 'groups') koResultById[m.id] = m.home_score != null; });
+
+  const isTeamConfirmed = (code) => {
+    if (!code) return false;
+    const grp = teamGroup[code];
+    if (grp) {
+      // Equipo viene de grupos: confirmado si su grupo cerró.
+      // Si pudo entrar como mejor tercero, exigir que todos los grupos hayan cerrado.
+      return groupClosed[grp] === true && allGroupsClosed;
+    }
+    // Si no está en teamGroup, viene de una ronda KO previa: ya está puesto por propagación real
+    return true;
+  };
+
+  // Solo las fases KO llevan marca de confirmación
+  for (const m of matches) {
+    if (m.phase !== 'groups') {
+      m.home_confirmed = isTeamConfirmed(m.home_team);
+      m.away_confirmed = isTeamConfirmed(m.away_team);
+    }
+  }
+
+  res.json(matches);
 });
 
 app.get('/api/matches/today', (req, res) => {
