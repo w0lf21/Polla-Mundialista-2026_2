@@ -342,17 +342,14 @@ app.get('/api/matches', (req, res) => {
   const matches = db.prepare(query).all(...params);
 
   // ── Confirmación matemática de equipos en el bracket ──
-  // Un equipo de bracket es "confirmado" si el grupo del que sale ya terminó.
-  // Regla general (cualquier torneo): grupo cerrado = todos sus partidos jugados.
-  // Para terceros (cuyo ranking es cross-grupo), se exige que TODOS los grupos hayan cerrado.
+  // Un equipo de bracket es "confirmado" si el grupo del que proviene ya cerró
+  // (todos sus partidos jugados). Los 1ros y 2dos de un grupo cerrado tienen
+  // posición fija. Regla general y reutilizable para cualquier torneo.
   const groupRows = db.prepare(`SELECT DISTINCT group_name FROM matches WHERE phase='groups' AND group_name IS NOT NULL`).all();
   const groupClosed = {};
-  let allGroupsClosed = true;
   for (const { group_name } of groupRows) {
     const gMatches = db.prepare(`SELECT home_score FROM matches WHERE phase='groups' AND group_name=?`).all(group_name);
-    const closed = gMatches.length > 0 && gMatches.every(m => m.home_score != null);
-    groupClosed[group_name] = closed;
-    if (!closed) allGroupsClosed = false;
+    groupClosed[group_name] = gMatches.length > 0 && gMatches.every(m => m.home_score != null);
   }
 
   // Mapa: cada equipo (code) pertenece a qué grupo
@@ -362,20 +359,12 @@ app.get('/api/matches', (req, res) => {
   db.prepare(`SELECT DISTINCT away_team, group_name FROM matches WHERE phase='groups' AND away_team IS NOT NULL`).all()
     .forEach(r => { teamGroup[r.away_team] = r.group_name; });
 
-  // Determina si un equipo en una llave KO está confirmado.
-  // Si el equipo viene de una ronda KO previa (no de grupos), está confirmado solo si esa llave ya se jugó.
-  const koResultById = {};
-  matches.forEach(m => { if (m.phase !== 'groups') koResultById[m.id] = m.home_score != null; });
-
+  // Un equipo en el bracket está confirmado si su grupo de origen ya cerró.
+  // (Si viene de una ronda KO previa, ya fue puesto por propagación real → confirmado.)
   const isTeamConfirmed = (code) => {
     if (!code) return false;
     const grp = teamGroup[code];
-    if (grp) {
-      // Equipo viene de grupos: confirmado si su grupo cerró.
-      // Si pudo entrar como mejor tercero, exigir que todos los grupos hayan cerrado.
-      return groupClosed[grp] === true && allGroupsClosed;
-    }
-    // Si no está en teamGroup, viene de una ronda KO previa: ya está puesto por propagación real
+    if (grp) return groupClosed[grp] === true;
     return true;
   };
 
