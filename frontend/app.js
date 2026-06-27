@@ -2998,7 +2998,11 @@ const app = {
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
         <div style="font-size:13px;color:var(--color-text-muted)">Los resultados se guardan y propagan automáticamente al siguiente partido.</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
-          ${groupsComplete && !bracketGenerated ? `<button class="btn-primary" style="width:auto;background:linear-gradient(135deg,#1a5c8a,#0f3d6b)" onclick="app.openBracketGenerator()">🔄 Generar Eliminatorias</button>` : ''}
+          ${!bracketGenerated
+            ? `<button class="btn-primary" style="width:auto;background:linear-gradient(135deg,#1a5c8a,#0f3d6b)" onclick="app.openBracketGenerator()">🔄 Generar Eliminatorias</button>`
+            : `<button class="btn-sm" style="background:transparent;border:1px solid var(--color-border);color:var(--color-text-muted);border-radius:6px;padding:6px 12px;cursor:pointer;font-size:12px" onclick="app.openBracketGenerator()">🔄 Regenerar bracket</button>`
+          }
+          <button class="btn-sm" style="background:transparent;border:1px solid var(--color-border);color:var(--color-text-muted);border-radius:6px;padding:6px 12px;cursor:pointer;font-size:12px" onclick="app.repropagate()" title="Avanza los ganadores reales a la siguiente ronda">⚡ Propagar ganadores</button>
           <button class="btn-primary" style="width:auto" onclick="app.saveAllAdminMatches()">💾 Guardar todo</button>
         </div>
       </div>
@@ -3112,7 +3116,15 @@ const app = {
 
   async openBracketGenerator() {
     const statusDiv = document.getElementById('admin-matches-msg');
-    if (!confirm('Se generarán automáticamente las eliminatorias según el reglamento FIFA (8 mejores terceros). ¿Continuar?')) return;
+    const groupsComplete = this.matches.filter(m => m.phase === 'groups').every(m => m.home_score != null);
+    const played = this.matches.filter(m => m.phase === 'groups' && m.home_score != null).length;
+    const total = this.matches.filter(m => m.phase === 'groups').length;
+
+    const msg = groupsComplete
+      ? '¿Generar eliminatorias con los 72 resultados completos?'
+      : `Faltan ${total - played} de ${total} partidos de grupos. ¿Generar el bracket con los resultados actuales? (puedes regenerarlo después)`;
+
+    if (!confirm(msg)) return;
 
     if (statusDiv) { statusDiv.textContent = 'Generando bracket...'; statusDiv.style.color = 'var(--color-text-muted)'; }
 
@@ -3121,7 +3133,6 @@ const app = {
       await this.loadData();
       this.renderAdminMatches();
 
-      // Mostrar resumen de clasificados
       const qualified = result.qualifiedThirds.map(t => {
         const team = this.teams.find(tm => tm.code === t.code);
         return `${team?.flag||''} ${team?.name||t.code} (${t.group})`;
@@ -3133,10 +3144,11 @@ const app = {
 
       if (statusDiv) {
         statusDiv.innerHTML = `
-          <div style="color:var(--color-success);margin-bottom:8px">✓ Bracket generado correctamente</div>
+          <div style="color:var(--color-success);margin-bottom:8px">✓ Bracket generado — ${played}/${total} partidos de grupos cargados</div>
           <div style="font-size:12px;color:var(--color-text-muted)">
             <strong>8 mejores terceros (clasificados):</strong> ${qualified}<br>
-            <strong>Terceros eliminados:</strong> ${eliminated || 'ninguno'}
+            ${eliminated ? `<strong>Terceros eliminados:</strong> ${eliminated}` : ''}
+            ${!groupsComplete ? '<br><span style="color:#fbbf24">⚠️ Recuerda regenerar el bracket cuando cargues los resultados restantes.</span>' : ''}
           </div>`;
       }
     } catch (e) {
