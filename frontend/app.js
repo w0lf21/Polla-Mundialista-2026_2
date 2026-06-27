@@ -711,7 +711,7 @@ const app = {
           <span><span style="display:inline-block;width:8px;height:8px;background:rgba(201,168,76,0.4);border-radius:2px;vertical-align:middle"></span> Ganador real</span>
           <span><span style="color:#60a5fa">● </span>Mi pronóstico</span>
           <span><span style="color:#4ade80">✓</span> Acerté · <span style="color:#f87171">✗</span> Fallé</span>
-          <span style="color:var(--color-text-muted)"><em>En gris</em> = aún sin confirmar matemáticamente · ??? = sin definir</span>
+          <span style="color:var(--color-text-muted)">??? = sin definir</span>
         </div>
         <div class="pw-scroll-hint">← Desliza horizontalmente para ver el bracket completo →</div>
         <div class="pw-bracket-wrapper">${bracketDesktopHtml}</div>
