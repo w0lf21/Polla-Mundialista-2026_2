@@ -828,8 +828,8 @@ const app = {
       const matchesById = {};
       this.matches.forEach(m => { matchesById[m.id] = m; });
 
-      const QF_PAIRS  = { 'QF-1': ['R32-1','R32-2'], 'QF-2': ['R32-3','R32-4'], 'QF-3': ['R32-5','R32-6'], 'QF-4': ['R32-7','R32-8'], 'QF-5': ['R32-9','R32-10'], 'QF-6': ['R32-11','R32-12'], 'QF-7': ['R32-13','R32-14'], 'QF-8': ['R32-15','R32-16'] };
-      const SF_PAIRS  = { 'SF-1': ['QF-1','QF-2'], 'SF-2': ['QF-3','QF-4'], 'SF-3': ['QF-5','QF-6'], 'SF-4': ['QF-7','QF-8'], 'SF-5': ['SF-1','SF-2'], 'SF-6': ['SF-3','SF-4'] };
+      const QF_PAIRS  = { 'QF-1': ['R32-3','R32-5'], 'QF-2': ['R32-1','R32-4'], 'QF-3': ['R32-2','R32-6'], 'QF-4': ['R32-7','R32-8'], 'QF-5': ['R32-11','R32-12'], 'QF-6': ['R32-9','R32-10'], 'QF-7': ['R32-14','R32-16'], 'QF-8': ['R32-13','R32-15'] };
+      const SF_PAIRS  = { 'SF-1': ['QF-1','QF-2'], 'SF-2': ['QF-5','QF-6'], 'SF-3': ['QF-3','QF-4'], 'SF-4': ['QF-7','QF-8'], 'SF-5': ['SF-1','SF-2'], 'SF-6': ['SF-3','SF-4'] };
       const FINAL_PAIR = ['SF-5','SF-6'];
 
       // Calcula el ganador pronosticado por el usuario para una llave
@@ -1332,8 +1332,8 @@ const app = {
       // ── Bracket: equipos reales + cascada con los pronósticos de ESTE usuario ──
       const matchesById = {};
       this.matches.forEach(m => { matchesById[m.id] = m; });
-      const QF = {'QF-1':['R32-1','R32-2'],'QF-2':['R32-3','R32-4'],'QF-3':['R32-5','R32-6'],'QF-4':['R32-7','R32-8'],'QF-5':['R32-9','R32-10'],'QF-6':['R32-11','R32-12'],'QF-7':['R32-13','R32-14'],'QF-8':['R32-15','R32-16']};
-      const SF = {'SF-1':['QF-1','QF-2'],'SF-2':['QF-3','QF-4'],'SF-3':['QF-5','QF-6'],'SF-4':['QF-7','QF-8'],'SF-5':['SF-1','SF-2'],'SF-6':['SF-3','SF-4']};
+      const QF = {'QF-1':['R32-3','R32-5'],'QF-2':['R32-1','R32-4'],'QF-3':['R32-2','R32-6'],'QF-4':['R32-7','R32-8'],'QF-5':['R32-11','R32-12'],'QF-6':['R32-9','R32-10'],'QF-7':['R32-14','R32-16'],'QF-8':['R32-13','R32-15']};
+      const SF = {'SF-1':['QF-1','QF-2'],'SF-2':['QF-5','QF-6'],'SF-3':['QF-3','QF-4'],'SF-4':['QF-7','QF-8'],'SF-5':['SF-1','SF-2'],'SF-6':['SF-3','SF-4']};
       const memo = {};
       const winOf = (id, h, a) => {
         const p = upreds[id];
@@ -1671,8 +1671,8 @@ const app = {
   // ── ELIMINATORIAS ───────────────────────────────────────────────────────────
 
   koFeederLabel(matchId) {
-    const QF_PAIRS = { 'QF-1': ['R32-1','R32-2'], 'QF-2': ['R32-3','R32-4'], 'QF-3': ['R32-5','R32-6'], 'QF-4': ['R32-7','R32-8'], 'QF-5': ['R32-9','R32-10'], 'QF-6': ['R32-11','R32-12'], 'QF-7': ['R32-13','R32-14'], 'QF-8': ['R32-15','R32-16'] };
-    const SF_PAIRS = { 'SF-1': ['QF-1','QF-2'], 'SF-2': ['QF-3','QF-4'], 'SF-3': ['QF-5','QF-6'], 'SF-4': ['QF-7','QF-8'], 'SF-5': ['SF-1','SF-2'], 'SF-6': ['SF-3','SF-4'] };
+    const QF_PAIRS = { 'QF-1': ['R32-3','R32-5'], 'QF-2': ['R32-1','R32-4'], 'QF-3': ['R32-2','R32-6'], 'QF-4': ['R32-7','R32-8'], 'QF-5': ['R32-11','R32-12'], 'QF-6': ['R32-9','R32-10'], 'QF-7': ['R32-14','R32-16'], 'QF-8': ['R32-13','R32-15'] };
+    const SF_PAIRS = { 'SF-1': ['QF-1','QF-2'], 'SF-2': ['QF-5','QF-6'], 'SF-3': ['QF-3','QF-4'], 'SF-4': ['QF-7','QF-8'], 'SF-5': ['SF-1','SF-2'], 'SF-6': ['SF-3','SF-4'] };
     const pretty = (id) => {
       if (id.startsWith('R32')) return 'Dieciseisavos ' + id.replace('R32-','');
       if (id.startsWith('QF')) return 'Octavos ' + id.replace('QF-','');
@@ -1698,8 +1698,8 @@ const app = {
     const matchesById = {};
     this.matches.forEach(m => { matchesById[m.id] = m; });
 
-    const QF_PAIRS  = { 'QF-1': ['R32-1','R32-2'], 'QF-2': ['R32-3','R32-4'], 'QF-3': ['R32-5','R32-6'], 'QF-4': ['R32-7','R32-8'], 'QF-5': ['R32-9','R32-10'], 'QF-6': ['R32-11','R32-12'], 'QF-7': ['R32-13','R32-14'], 'QF-8': ['R32-15','R32-16'] };
-    const SF_PAIRS  = { 'SF-1': ['QF-1','QF-2'], 'SF-2': ['QF-3','QF-4'], 'SF-3': ['QF-5','QF-6'], 'SF-4': ['QF-7','QF-8'], 'SF-5': ['SF-1','SF-2'], 'SF-6': ['SF-3','SF-4'] };
+    const QF_PAIRS  = { 'QF-1': ['R32-3','R32-5'], 'QF-2': ['R32-1','R32-4'], 'QF-3': ['R32-2','R32-6'], 'QF-4': ['R32-7','R32-8'], 'QF-5': ['R32-11','R32-12'], 'QF-6': ['R32-9','R32-10'], 'QF-7': ['R32-14','R32-16'], 'QF-8': ['R32-13','R32-15'] };
+    const SF_PAIRS  = { 'SF-1': ['QF-1','QF-2'], 'SF-2': ['QF-5','QF-6'], 'SF-3': ['QF-3','QF-4'], 'SF-4': ['QF-7','QF-8'], 'SF-5': ['SF-1','SF-2'], 'SF-6': ['SF-3','SF-4'] };
     const FINAL_PAIR = ['SF-5','SF-6'];
 
     const koWinnerOf = (matchId, homeCode, awayCode) => {
