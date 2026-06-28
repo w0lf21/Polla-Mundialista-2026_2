@@ -59,6 +59,9 @@ const app = {
         this.user = data.user;
         sessionStorage.setItem('polla_token', this.token);
         await this.loadData();
+        // Restaurar el botón antes de entrar (evita que quede en "Entrando..." al volver al login)
+        btn.classList.remove('btn-login-loading');
+        btn.textContent = 'Entrar';
         this.showApp();
       } catch (e) {
         btn.classList.remove('btn-login-loading');
@@ -130,7 +133,34 @@ const app = {
   },
 
   showLogin() {
-    document.getElementById('login-screen').classList.add('active');
+    // Limpiar residuos de la animación de entrada
+    const loginScreen = document.getElementById('login-screen');
+    loginScreen.style.opacity = '';
+    loginScreen.style.transition = '';
+    document.getElementById('entry-overlay')?.remove();
+
+    // Resetear formularios
+    document.getElementById('login-form')?.reset();
+    document.getElementById('register-form')?.reset();
+    document.getElementById('login-error').textContent = '';
+    document.getElementById('register-error').textContent = '';
+
+    // Restaurar el botón de login (queda en "Entrando..." tras un login exitoso)
+    const loginBtn = document.querySelector('#login-form button[type=submit]');
+    if (loginBtn) {
+      loginBtn.classList.remove('btn-login-loading');
+      loginBtn.textContent = 'Entrar';
+    }
+
+    // Restaurar tab de login activo
+    document.querySelectorAll('.tab-toggle').forEach(b => {
+      b.classList.toggle('active', b.dataset.tab === 'login');
+    });
+    document.getElementById('login-form').classList.add('active');
+    document.getElementById('register-form').classList.remove('active');
+
+    // Cambiar pantallas
+    loginScreen.classList.add('active');
     document.getElementById('app-screen').classList.remove('active');
   },
 
@@ -138,20 +168,50 @@ const app = {
     const loginScreen = document.getElementById('login-screen');
     const appScreen = document.getElementById('app-screen');
 
-    // Animación de salida del login — zoom out como cámara alejándose
-    loginScreen.style.animation = 'loginFadeOut 0.5s ease forwards';
+    // Reproducir sonido de entrada (descomenta cuando subas el archivo)
+    this.playEntrySound();
 
-    setTimeout(() => {
-      loginScreen.classList.remove('active');
-      loginScreen.style.animation = '';
-      appScreen.classList.add('active');
-      appScreen.style.animation = 'appStadiumReveal 0.6s ease both';
-    }, 450);
+    // Crear overlay de zoom + flash dorado
+    const overlay = document.createElement('div');
+    overlay.id = 'entry-overlay';
+    overlay.innerHTML = `
+      <div class="entry-flash"></div>
+      <img src="logo-mundial-2026.png" alt="" class="entry-logo">
+    `;
+    document.body.appendChild(overlay);
 
+    // Pre-cargar la app debajo del overlay
     document.getElementById('header-username').textContent = this.user.display_name;
     await this.refreshPoints();
     this.renderNav();
     this.navigate('fixture');
+
+    // Transición: login → overlay con zoom → flash → app
+    loginScreen.style.transition = 'opacity 0.3s ease';
+    loginScreen.style.opacity = '0';
+
+    setTimeout(() => {
+      loginScreen.classList.remove('active');
+      loginScreen.style.opacity = '';
+      loginScreen.style.transition = '';
+      appScreen.classList.add('active');
+    }, 300);
+
+    // Remover overlay después de toda la animación (1.6s)
+    setTimeout(() => {
+      overlay.style.opacity = '0';
+      setTimeout(() => overlay.remove(), 400);
+    }, 1600);
+  },
+
+  playEntrySound() {
+    try {
+      const audio = new Audio('entry-sound.mp3');
+      audio.volume = 0.6;
+      audio.play().catch(() => {
+        // El navegador bloqueó el sonido o no existe el archivo, ignorar silenciosamente
+      });
+    } catch (e) { /* archivo no existe aún, ignorar */ }
   },
 
   logout() {
@@ -172,12 +232,12 @@ const app = {
   renderNav() {
     const views = [
       { id: 'fixture',    label: 'Fixture' },
+      { id: 'leaderboard',label: 'Ranking' },
       { id: 'today',      label: 'Hoy' },
       { id: 'groups',     label: 'Grupos' },
       { id: 'knockout',   label: 'Eliminatorias' },
       { id: 'podium',     label: 'Podio' },
       { id: 'minipollas', label: 'Mini-Pronósticos' },
-      { id: 'leaderboard',label: 'Ranking' },
       { id: 'rules',      label: 'Reglas' }
     ];
     if (this.user.is_admin) views.push({ id: 'admin', label: 'Admin' });
@@ -216,6 +276,7 @@ const app = {
 
   renderFixture(main) {
     this._fixtureTab = this._fixtureTab || 'groups';
+    this._mypredLoaded = false;
 
     // Calcular posiciones reales de cada grupo
     const groupMatches = this.matches.filter(m => m.phase === 'groups');
@@ -261,48 +322,184 @@ const app = {
       I:'#9d174d', J:'#065f46', K:'#7c2d12', L:'#164e63'
     };
 
-    // ── Tarjeta de partido para bracket
+    // ── Tarjeta de partido para bracket: muestra cruce REAL + mi predicción de ganador
+    const myPreds = this.predictions || {};
     const matchCard = (m) => {
       if (!m) return `<div class="bk-match empty">?</div>`;
       const home = m.home_team ? this.teamByCode(m.home_team) : null;
       const away = m.away_team ? this.teamByCode(m.away_team) : null;
       const hasResult = m.home_score != null;
       const wc = m.winner;
-      return `<div class="bk-match${hasResult ? ' played' : ''}">
-        <div class="bk-team ${wc === m.home_team ? 'winner' : hasResult ? 'loser' : ''}">
-          <span class="bk-flag">${home?.flag || '?'}</span>
-          <span class="bk-name">${home?.name || '?'}</span>
-          ${hasResult ? `<span class="bk-score">${m.home_score}${m.pen_home != null ? `(${m.pen_home})` : ''}</span>` : ''}
-        </div>
-        <div class="bk-team ${wc === m.away_team ? 'winner' : hasResult ? 'loser' : ''}">
-          <span class="bk-flag">${away?.flag || '?'}</span>
-          <span class="bk-name">${away?.name || '?'}</span>
-          ${hasResult ? `<span class="bk-score">${m.away_score}${m.pen_away != null ? `(${m.pen_away})` : ''}</span>` : ''}
-        </div>
+      const bothDefined = m.home_team && m.away_team;
+
+      // Mi predicción para ESTE cruce real
+      const pred = myPreds[m.id];
+      let myPick = null; // código del equipo que predije como ganador
+      if (pred && bothDefined) {
+        const ph = pred.pred_home != null ? parseInt(pred.pred_home) : null;
+        const pa = pred.pred_away != null ? parseInt(pred.pred_away) : null;
+        if (ph != null && pa != null) {
+          if (ph > pa) myPick = m.home_team;
+          else if (pa > ph) myPick = m.away_team;
+          else myPick = pred.pred_winner || null; // empate → ganador por penales
+        } else if (pred.pred_winner) {
+          myPick = pred.pred_winner;
+        }
+      }
+      const myScore = (pred && pred.pred_home != null) ? `${pred.pred_home}-${pred.pred_away}` : null;
+
+      // Marca de acierto si ya hay resultado
+      let pickResult = ''; // 'hit' | 'miss' | ''
+      if (hasResult && myPick && wc) {
+        pickResult = myPick === wc ? 'hit' : 'miss';
+      }
+
+      const teamRow = (team, code, scoreVal, penVal, confirmed) => {
+        const isRealWinner = wc === code;
+        const isMyPick = myPick === code;
+        const cls = isRealWinner ? 'winner' : (hasResult ? 'loser' : '');
+        // Equipo aún no confirmado matemáticamente → gris opaco (provisional)
+        const provisional = bothDefined && confirmed === false && !hasResult;
+        return `<div class="bk-team ${cls}${isMyPick ? ' mypick' : ''}${provisional ? ' provisional' : ''}">
+          <span class="bk-flag">${team?.flag || '?'}</span>
+          <span class="bk-name">${team?.name || (bothDefined ? '?' : '???')}</span>
+          ${isMyPick ? '<span class="bk-pick-dot" title="Mi pronóstico de ganador">●</span>' : ''}
+          ${hasResult ? `<span class="bk-score">${scoreVal}${penVal != null ? `(${penVal})` : ''}</span>` : ''}
+        </div>`;
+      };
+
+      return `<div class="bk-match${hasResult ? ' played' : ''}${pickResult ? ' pick-'+pickResult : ''}">
+        ${teamRow(home, m.home_team, m.home_score, m.pen_home, m.home_confirmed)}
+        ${teamRow(away, m.away_team, m.away_score, m.pen_away, m.away_confirmed)}
+        ${myScore || myPick ? `<div class="bk-mypred">🎯 Mi pred: ${myScore ? myScore : (myPick ? this.teamByCode(myPick)?.name : '—')}${pickResult === 'hit' ? ' <span style="color:#4ade80">✓</span>' : pickResult === 'miss' ? ' <span style="color:#f87171">✗</span>' : ''}</div>` : ''}
       </div>`;
     };
 
-    // ── Grupos HTML
+    // ── Grupos HTML unificado: resultado real + mi pronóstico lado a lado
+    const myPredsByMatch = this.predictions || {};
+
+    // Calcular posiciones de cada grupo SEGÚN MIS PRONÓSTICOS
+    const myGroups = {};
+    groupMatches.forEach(m => {
+      if (!myGroups[m.group_name]) myGroups[m.group_name] = {};
+      [m.home_team, m.away_team].forEach(code => {
+        if (code && !myGroups[m.group_name][code]) {
+          const t = this.teamByCode(code);
+          myGroups[m.group_name][code] = { code, name: t.name, flag: t.flag, pts: 0, pj: 0, gf: 0, ga: 0, gd: 0 };
+        }
+      });
+      const pred = myPredsByMatch[m.id];
+      if (pred && pred.pred_home != null && m.home_team && m.away_team) {
+        const h = myGroups[m.group_name][m.home_team];
+        const a = myGroups[m.group_name][m.away_team];
+        if (h && a) {
+          const ph = parseInt(pred.pred_home), pa = parseInt(pred.pred_away);
+          h.pj++; a.pj++;
+          h.gf += ph; h.ga += pa;
+          a.gf += pa; a.ga += ph;
+          h.gd = h.gf - h.ga; a.gd = a.gf - a.ga;
+          if (ph > pa) h.pts += 3;
+          else if (pa > ph) a.pts += 3;
+          else { h.pts += 1; a.pts += 1; }
+        }
+      }
+    });
+    const mySortedGroups = {};
+    for (const [g, teams] of Object.entries(myGroups)) {
+      mySortedGroups[g] = Object.values(teams).sort((a, b) =>
+        b.pts !== a.pts ? b.pts - a.pts : b.gd !== a.gd ? b.gd - a.gd : b.gf - a.gf
+      );
+    }
+
+    const miniStandingTable = (standing, isPred) => `
+      <table class="fixture-group-table">
+        <thead><tr><th></th><th>Equipo</th><th>PJ</th><th>Pts</th><th>GD</th></tr></thead>
+        <tbody>
+          ${standing.map((t, i) => `
+            <tr class="${i < 2 ? 'classified' : ''}">
+              <td style="font-size:10px;color:var(--color-text-muted)">${i+1}</td>
+              <td style="font-size:11px"><span style="margin-right:3px">${t.flag}</span>${t.name}</td>
+              <td style="text-align:center;font-size:11px">${t.pj}</td>
+              <td style="text-align:center;font-size:11px;font-weight:${i<2?'700':'400'}">${t.pts}</td>
+              <td style="text-align:center;font-size:11px">${t.gd > 0 ? '+' : ''}${t.gd}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>`;
+
     const groupsHtml = Object.keys(sortedGroups).sort().map(g => {
       const standing = sortedGroups[g];
+      const myStanding = mySortedGroups[g] || [];
       const color = groupColors[g] || '#C9A84C';
+      const gMatches = groupMatches.filter(m => m.group_name === g);
+
+      // Filas de partidos con columnas alineadas vía <colgroup>
+      const matchRows = gMatches.map(m => {
+        const home = this.teamByCode(m.home_team);
+        const away = this.teamByCode(m.away_team);
+        const pred = myPredsByMatch[m.id];
+        const hasResult = m.home_score != null;
+        const hasPred = pred && pred.pred_home != null;
+        const realStr = hasResult ? `${m.home_score}-${m.away_score}` : '–';
+        const predStr = hasPred ? `${pred.pred_home}-${pred.pred_away}` : '–';
+
+        let pts = null, ptsColor = 'var(--color-text-muted)';
+        if (hasResult && hasPred) {
+          const ph = parseInt(pred.pred_home), pa = parseInt(pred.pred_away);
+          const rh = parseInt(m.home_score), ra = parseInt(m.away_score);
+          if (ph === rh && pa === ra) { pts = 5; ptsColor = '#C9A84C'; }
+          else {
+            const pr = ph > pa ? 'H' : ph < pa ? 'A' : 'D';
+            const rr = rh > ra ? 'H' : rh < ra ? 'A' : 'D';
+            if (pr !== rr) { pts = 0; }
+            else if (Math.abs(ph-pa) === Math.abs(rh-ra)) { pts = 3; ptsColor = '#60a5fa'; }
+            else { pts = 2; ptsColor = '#4ade80'; }
+          }
+        }
+
+        return `<tr style="${!hasResult ? 'opacity:0.75' : ''}">
+          <td style="font-size:11px;text-align:right;white-space:nowrap;padding:3px 4px">${home.name} ${home.flag}</td>
+          <td style="text-align:center;padding:3px 4px">
+            <span style="background:var(--color-background-secondary);border-radius:4px;padding:1px 6px;font-weight:600;font-size:11px">${realStr}</span>
+          </td>
+          <td style="text-align:center;padding:3px 4px">
+            <span style="background:${hasPred ? 'rgba(255,255,255,0.06)' : 'transparent'};border-radius:4px;padding:1px 6px;font-size:11px;color:${hasPred ? 'var(--color-text)' : 'var(--color-text-muted)'}">${predStr}</span>
+          </td>
+          <td style="text-align:center;font-size:11px;font-weight:700;color:${ptsColor};padding:3px 4px">${pts !== null ? (pts > 0 ? '+'+pts : '✗') : '·'}</td>
+          <td style="font-size:11px;text-align:left;white-space:nowrap;padding:3px 4px">${away.flag} ${away.name}</td>
+        </tr>`;
+      }).join('');
+
       return `
         <div class="fixture-group-card" style="border-left:3px solid ${color}">
           <div class="fixture-group-title" style="color:${color}">Grupo ${g}</div>
-          <table class="fixture-group-table">
-            <thead><tr><th></th><th>Equipo</th><th>PJ</th><th>Pts</th><th>GD</th></tr></thead>
-            <tbody>
-              ${standing.map((t, i) => `
-                <tr class="${i < 2 ? 'classified' : ''}">
-                  <td style="font-size:11px;color:var(--color-text-muted)">${i+1}</td>
-                  <td><span style="margin-right:4px">${t.flag}</span>${t.name}</td>
-                  <td style="text-align:center">${t.pj}</td>
-                  <td style="text-align:center;font-weight:${i<2?'700':'400'}">${t.pts}</td>
-                  <td style="text-align:center">${t.gd > 0 ? '+' : ''}${t.gd}</td>
+          <div class="fgc-standings">
+            <div>
+              <div class="fgc-label">📊 Posiciones reales</div>
+              ${miniStandingTable(standing, false)}
+            </div>
+            <div>
+              <div class="fgc-label">🎯 Según mi pronóstico</div>
+              ${miniStandingTable(myStanding, true)}
+            </div>
+          </div>
+          <div class="fgc-matches-wrap">
+            <table class="fgc-matches">
+              <colgroup>
+                <col style="width:32%"><col style="width:16%"><col style="width:16%"><col style="width:10%"><col style="width:26%">
+              </colgroup>
+              <thead>
+                <tr>
+                  <th style="text-align:right">Local</th>
+                  <th style="text-align:center">Real</th>
+                  <th style="text-align:center">Mi pred</th>
+                  <th style="text-align:center">Pts</th>
+                  <th style="text-align:left">Visitante</th>
                 </tr>
-              `).join('')}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>${matchRows}</tbody>
+            </table>
+          </div>
         </div>`;
     }).join('');
 
@@ -374,20 +571,33 @@ const app = {
         .fixture-tab-content.active { display:block; }
 
         /* ── Grupos grid ── */
-        .fixture-groups-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
-        @media(max-width:500px){ .fixture-groups-grid{ grid-template-columns:1fr; } }
+        .fixture-groups-grid { display:grid; grid-template-columns:1fr; gap:12px; }
+        @media(min-width:900px){ .fixture-groups-grid{ grid-template-columns:1fr 1fr; } }
         .fixture-group-card {
           background:var(--color-surface); border:1px solid var(--color-border);
-          border-radius:var(--radius-md); padding:8px;
+          border-radius:var(--radius-md); padding:10px;
           transition:transform 0.2s, box-shadow 0.2s;
         }
         .fixture-group-card:hover { transform:translateY(-1px); box-shadow:0 4px 12px rgba(0,0,0,0.3); }
-        .fixture-group-title { font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:6px; }
+        .fixture-group-title { font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px; }
         .fixture-group-table { width:100%; border-collapse:collapse; font-size:12px; }
         .fixture-group-table th { font-size:10px; color:var(--color-text-muted); font-weight:500; padding:2px 4px; text-align:left; }
         .fixture-group-table td { padding:3px 4px; color:var(--color-text); white-space:nowrap; }
         .fixture-group-table tr.classified { background:rgba(255,255,255,0.04); }
         .fixture-group-table tr.classified td:nth-child(2) { font-weight:600; }
+
+        /* ── Grupo unificado: dos tablas de posiciones + partidos ── */
+        .fgc-standings { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px; }
+        .fgc-label { font-size:9px; font-weight:700; color:var(--color-text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px; }
+        .fgc-matches-wrap { overflow-x:auto; }
+        .fgc-matches { width:100%; border-collapse:collapse; }
+        .fgc-matches th { font-size:9px; color:var(--color-text-muted); font-weight:600; text-transform:uppercase; letter-spacing:0.3px; padding:4px; border-bottom:1px solid var(--color-border); }
+        .fgc-matches td { color:var(--color-text); }
+        @media(max-width:480px){
+          .fgc-standings { grid-template-columns:1fr; gap:8px; }
+          .fgc-matches { min-width:300px; }
+        }
+
 
         /* ── Tarjeta de partido bracket ── */
         .bk-match {
@@ -396,14 +606,21 @@ const app = {
           transition:border-color 0.2s; margin-bottom:4px;
         }
         .bk-match.played { border-color:rgba(201,168,76,0.35); }
+        .bk-match.pick-hit { border-color:rgba(74,222,128,0.5); }
+        .bk-match.pick-miss { border-color:rgba(248,113,113,0.4); }
         .bk-match.empty { padding:8px; font-size:11px; color:var(--color-text-muted); font-style:italic; text-align:center; }
         .bk-team { display:flex; align-items:center; gap:5px; padding:4px 7px; font-size:11px; border-bottom:1px solid var(--color-border); }
         .bk-team:last-child { border-bottom:none; }
         .bk-team.winner { background:rgba(201,168,76,0.1); font-weight:700; color:var(--color-primary); }
         .bk-team.loser { opacity:0.4; }
+        .bk-team.mypick { box-shadow:inset 3px 0 0 #60a5fa; }
+        .bk-team.provisional { opacity:0.55; }
+        .bk-team.provisional .bk-name { color:var(--color-text-muted); font-style:italic; }
         .bk-flag { font-size:13px; flex-shrink:0; }
         .bk-name { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
         .bk-score { font-weight:700; font-size:12px; flex-shrink:0; }
+        .bk-pick-dot { color:#60a5fa; font-size:8px; flex-shrink:0; }
+        .bk-mypred { font-size:9px; color:var(--color-text-muted); padding:2px 7px; background:rgba(96,165,250,0.06); border-top:1px solid var(--color-border); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 
         /* ── Bracket pathway (siempre visible, scroll horizontal en mobile) ── */
         .pw-bracket {
@@ -489,6 +706,13 @@ const app = {
         <div class="fixture-groups-grid">${groupsHtml}</div>
       </div>
       <div class="fixture-tab-content ${this._fixtureTab === 'finals' ? 'active' : ''}" id="ftab-finals">
+        <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;font-size:11px;color:var(--color-text-muted);margin-bottom:8px;padding:6px 10px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:8px">
+          <span style="font-weight:700;color:var(--color-text)">Leyenda:</span>
+          <span><span style="display:inline-block;width:8px;height:8px;background:rgba(201,168,76,0.4);border-radius:2px;vertical-align:middle"></span> Ganador real</span>
+          <span><span style="color:#60a5fa">● </span>Mi pronóstico</span>
+          <span><span style="color:#4ade80">✓</span> Acerté · <span style="color:#f87171">✗</span> Fallé</span>
+          <span style="color:var(--color-text-muted)">??? = sin definir</span>
+        </div>
         <div class="pw-scroll-hint">← Desliza horizontalmente para ver el bracket completo →</div>
         <div class="pw-bracket-wrapper">${bracketDesktopHtml}</div>
       </div>
@@ -504,6 +728,691 @@ const app = {
         document.getElementById(`ftab-${this._fixtureTab}`).classList.add('active');
       });
     });
+  },
+
+  // ── MI PRONÓSTICO ──────────────────────────────────────────────────────────
+
+  async loadMyPredictions() {
+    const container = document.getElementById('mypred-content');
+    if (!container) return;
+    container.innerHTML = '<div style="text-align:center;color:var(--color-text-muted);padding:2rem">Cargando mi pronóstico...</div>';
+
+    try {
+      const [classified, freshPreds, podiumData] = await Promise.all([
+        this.api('/predictions/classified'),
+        this.api('/predictions'),
+        this.api('/podium').catch(() => null)
+      ]);
+      // Refrescar predicciones locales para que "Mis marcadores" siempre esté al día
+      this.predictions = Object.fromEntries(freshPreds.map(p => [p.match_id, p]));
+
+      // Si el usuario no tiene pronósticos, mostrar mensaje claro en vez de tablas vacías
+      const groupMatches = this.matches.filter(m => m.phase === 'groups');
+      const filledGroup = groupMatches.filter(m => this.predictions[m.id] && this.predictions[m.id].pred_home != null).length;
+      if (filledGroup === 0) {
+        container.innerHTML = `<div style="text-align:center;padding:2.5rem 1rem">
+          <div style="font-size:2.2rem;margin-bottom:8px">📝</div>
+          <p style="color:var(--color-text-muted);font-size:14px">Aún no tienes pronósticos registrados${!this.lockStatus.locked ? '.<br>Ve a la pestaña <strong>Grupos</strong> para llenarlos.' : '.'}</p>
+        </div>`;
+        return;
+      }
+
+      const groupColors = {
+        A:'#1a5c8a', B:'#6b21a8', C:'#166534', D:'#991b1b',
+        E:'#0f766e', F:'#92400e', G:'#5b21b6', H:'#1e40af',
+        I:'#9d174d', J:'#065f46', K:'#7c2d12', L:'#164e63'
+      };
+
+      // ── Grupos con predicciones ──
+      const matchesByGroup = {};
+      groupMatches.forEach(m => {
+        if (!matchesByGroup[m.group_name]) matchesByGroup[m.group_name] = [];
+        matchesByGroup[m.group_name].push(m);
+      });
+
+      const groupsHtml = Object.keys(classified.groups).sort().map(g => {
+        const standings = classified.groups[g];
+        const color = groupColors[g] || '#C9A84C';
+        const gMatches = matchesByGroup[g] || [];
+
+        const matchesHtml = gMatches.map(m => {
+          const pred = this.predictions[m.id];
+          const home = this.teamByCode(m.home_team);
+          const away = this.teamByCode(m.away_team);
+          const ph = pred ? pred.pred_home : null;
+          const pa = pred ? pred.pred_away : null;
+          const hasPred = ph != null && pa != null;
+          return `<div style="display:flex;align-items:center;gap:4px;font-size:11px;padding:2px 0;${!hasPred ? 'opacity:0.4' : ''}">
+            <span style="flex:1;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${home.flag} ${home.name}</span>
+            <span style="font-weight:700;min-width:32px;text-align:center;background:var(--color-background-secondary);border-radius:4px;padding:1px 4px">${hasPred ? ph + '-' + pa : '–'}</span>
+            <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${away.flag} ${away.name}</span>
+          </div>`;
+        }).join('');
+
+        return `
+          <div class="fixture-group-card" style="border-left:3px solid ${color}">
+            <div class="fixture-group-title" style="color:${color}">Grupo ${g}</div>
+            <table class="fixture-group-table">
+              <thead><tr><th></th><th>Equipo</th><th>PJ</th><th>Pts</th><th>GD</th></tr></thead>
+              <tbody>
+                ${standings.map((t, i) => `
+                  <tr class="${t.classified ? 'classified' : ''}" ${i === 2 && classified.best8Thirds.some(b => b.code === t.team) ? 'style="background:rgba(201,168,76,0.08)"' : ''}>
+                    <td style="font-size:11px;color:var(--color-text-muted)">${i+1}</td>
+                    <td><span style="margin-right:4px">${t.team_info.flag}</span>${t.team_info.name}</td>
+                    <td style="text-align:center">${t.played}</td>
+                    <td style="text-align:center;font-weight:${t.classified?'700':'400'}">${t.pts}</td>
+                    <td style="text-align:center">${t.gd > 0 ? '+' : ''}${t.gd}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+            <div style="margin-top:8px;padding-top:6px;border-top:1px solid var(--color-border)">
+              <div style="font-size:10px;font-weight:600;color:var(--color-text-muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px">Mis marcadores</div>
+              ${matchesHtml}
+            </div>
+          </div>`;
+      }).join('');
+
+      // ── Mejores terceros ──
+      const best8Html = classified.best8Thirds.length > 0 ? `
+        <div style="margin:12px 0;padding:10px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius-md)">
+          <div style="font-size:11px;font-weight:700;color:var(--color-primary);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">Mis 8 mejores terceros clasificados</div>
+          <div style="display:flex;flex-wrap:wrap;gap:6px">
+            ${classified.best8Thirds.map(t => `<span style="font-size:12px;padding:3px 8px;background:rgba(201,168,76,0.1);border:1px solid rgba(201,168,76,0.25);border-radius:12px">${t.flag} ${t.name}</span>`).join('')}
+          </div>
+        </div>` : '';
+
+      // ── Bracket: equipos REALES del fixture + pronósticos del usuario en cascada ──
+      // R32 arranca con los equipos reales que el admin va completando
+      // De ahí en adelante, cada llave se llena con el ganador que el usuario pronosticó
+      const matchesById = {};
+      this.matches.forEach(m => { matchesById[m.id] = m; });
+
+      const QF_PAIRS  = { 'QF-1': ['R32-2','R32-6'], 'QF-2': ['R32-1','R32-3'], 'QF-3': ['R32-4','R32-5'], 'QF-4': ['R32-7','R32-8'], 'QF-5': ['R32-11','R32-12'], 'QF-6': ['R32-9','R32-10'], 'QF-7': ['R32-15','R32-14'], 'QF-8': ['R32-13','R32-16'] };
+      const SF_PAIRS  = { 'SF-1': ['QF-1','QF-2'], 'SF-2': ['QF-3','QF-4'], 'SF-3': ['QF-5','QF-6'], 'SF-4': ['QF-7','QF-8'], 'SF-5': ['SF-1','SF-2'], 'SF-6': ['SF-3','SF-4'] };
+      const FINAL_PAIR = ['SF-5','SF-6'];
+
+      // Calcula el ganador pronosticado por el usuario para una llave
+      // (deriva del marcador; si empate, usa pred_winner para penales)
+      const userWinnerOf = (matchId, homeCode, awayCode) => {
+        const pred = this.predictions[matchId];
+        if (!pred) return null;
+        const ph = pred.pred_home != null ? parseInt(pred.pred_home) : null;
+        const pa = pred.pred_away != null ? parseInt(pred.pred_away) : null;
+        if (ph != null && pa != null && ph !== pa) return ph > pa ? homeCode : awayCode;
+        return pred.pred_winner || null;
+      };
+      const userLoserOf = (matchId, homeCode, awayCode) => {
+        const w = userWinnerOf(matchId, homeCode, awayCode);
+        if (!w) return null;
+        return w === homeCode ? awayCode : homeCode;
+      };
+
+      // Resuelve los equipos de cada llave en cascada (memoizado)
+      const resolved = {};
+      const resolveMatch = (matchId) => {
+        if (resolved[matchId]) return resolved[matchId];
+
+        let homeCode = null, awayCode = null;
+
+        if (matchId.startsWith('R32')) {
+          // R32 usa los equipos REALES del fixture
+          const m = matchesById[matchId];
+          homeCode = m?.home_team || null;
+          awayCode = m?.away_team || null;
+        } else if (QF_PAIRS[matchId]) {
+          const [a, b] = QF_PAIRS[matchId];
+          const ra = resolveMatch(a);
+          const rb = resolveMatch(b);
+          homeCode = userWinnerOf(a, ra.homeCode, ra.awayCode);
+          awayCode = userWinnerOf(b, rb.homeCode, rb.awayCode);
+        } else if (SF_PAIRS[matchId]) {
+          const [a, b] = SF_PAIRS[matchId];
+          const ra = resolveMatch(a);
+          const rb = resolveMatch(b);
+          homeCode = userWinnerOf(a, ra.homeCode, ra.awayCode);
+          awayCode = userWinnerOf(b, rb.homeCode, rb.awayCode);
+        } else if (matchId === 'FINAL') {
+          const [a, b] = FINAL_PAIR;
+          const ra = resolveMatch(a);
+          const rb = resolveMatch(b);
+          homeCode = userWinnerOf(a, ra.homeCode, ra.awayCode);
+          awayCode = userWinnerOf(b, rb.homeCode, rb.awayCode);
+        } else if (matchId === 'TP') {
+          // 3er puesto: perdedores de SF-5 y SF-6 según el usuario
+          const ra = resolveMatch('SF-5');
+          const rb = resolveMatch('SF-6');
+          homeCode = userLoserOf('SF-5', ra.homeCode, ra.awayCode);
+          awayCode = userLoserOf('SF-6', rb.homeCode, rb.awayCode);
+        }
+
+        resolved[matchId] = { homeCode, awayCode };
+        return resolved[matchId];
+      };
+
+      const myMatchCard = (matchId) => {
+        const { homeCode, awayCode } = resolveMatch(matchId);
+        const home = homeCode ? this.teamByCode(homeCode) : null;
+        const away = awayCode ? this.teamByCode(awayCode) : null;
+        const pred = this.predictions[matchId];
+        const hasPred = !!(pred && (pred.pred_home != null || pred.pred_winner != null));
+
+        const predWinner = homeCode && awayCode ? userWinnerOf(matchId, homeCode, awayCode) : null;
+
+        const showScore = pred && pred.pred_home != null;
+        const penH = pred && pred.pred_pen_home != null ? `(${pred.pred_pen_home})` : '';
+        const penA = pred && pred.pred_pen_away != null ? `(${pred.pred_pen_away})` : '';
+
+        if (!home && !away) return `<div class="bk-match empty"><div class="bk-team"><span class="bk-name" style="opacity:0.5">Por definir</span></div><div class="bk-team"><span class="bk-name" style="opacity:0.5">Por definir</span></div></div>`;
+
+        return `<div class="bk-match${hasPred ? ' played' : ''}">
+          <div class="bk-team ${predWinner && home && predWinner === home.code ? 'winner' : predWinner && home ? 'loser' : ''}">
+            <span class="bk-flag">${home?.flag || '?'}</span>
+            <span class="bk-name">${home?.name || 'Por definir'}</span>
+            ${showScore ? `<span class="bk-score">${pred.pred_home}${penH}</span>` : ''}
+          </div>
+          <div class="bk-team ${predWinner && away && predWinner === away.code ? 'winner' : predWinner && away ? 'loser' : ''}">
+            <span class="bk-flag">${away?.flag || '?'}</span>
+            <span class="bk-name">${away?.name || 'Por definir'}</span>
+            ${showScore ? `<span class="bk-score">${pred.pred_away}${penA}</span>` : ''}
+          </div>
+        </div>`;
+      };
+
+      const myCol = (matchIds, label) => `
+        <div class="pw-col">
+          <div class="pw-col-label">${label}</div>
+          <div class="pw-col-matches">
+            ${matchIds.map(id => myMatchCard(id)).join('')}
+          </div>
+        </div>`;
+
+      const myBracketHtml = `
+        <div class="pw-bracket">
+          <div class="pw-side pw-left">
+            ${myCol(['R32-1','R32-2','R32-3','R32-4','R32-5','R32-6','R32-7','R32-8'], 'Dieciseisavos')}
+            ${myCol(['QF-1','QF-2','QF-3','QF-4'], 'Octavos')}
+            ${myCol(['SF-1','SF-2'], 'Cuartos')}
+            ${myCol(['SF-5'], 'Semis')}
+          </div>
+          <div class="pw-center">
+            <div class="pw-center-label">Gran Final</div>
+            ${myMatchCard('FINAL')}
+            <div class="pw-center-label" style="margin-top:16px">3er Puesto</div>
+            ${myMatchCard('TP')}
+          </div>
+          <div class="pw-side pw-right">
+            ${myCol(['SF-6'], 'Semis')}
+            ${myCol(['SF-3','SF-4'], 'Cuartos')}
+            ${myCol(['QF-5','QF-6','QF-7','QF-8'], 'Octavos')}
+            ${myCol(['R32-9','R32-10','R32-11','R32-12','R32-13','R32-14','R32-15','R32-16'], 'Dieciseisavos')}
+          </div>
+        </div>`;
+
+      // ── Podio predicho ──
+      let podiumHtml = '';
+      if (podiumData && podiumData.first_place) {
+        const t1 = this.teamByCode(podiumData.first_place);
+        const t2 = podiumData.second_place ? this.teamByCode(podiumData.second_place) : null;
+        const t3 = podiumData.third_place ? this.teamByCode(podiumData.third_place) : null;
+        podiumHtml = `
+          <div style="margin:12px 0;padding:10px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius-md)">
+            <div style="font-size:11px;font-weight:700;color:var(--color-primary);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Mi podio</div>
+            <div style="display:flex;justify-content:center;gap:16px;flex-wrap:wrap">
+              <div style="text-align:center"><div style="font-size:22px">🥇</div><div style="font-size:13px;font-weight:700">${t1.flag} ${t1.name}</div></div>
+              ${t2 ? `<div style="text-align:center"><div style="font-size:22px">🥈</div><div style="font-size:13px;font-weight:600">${t2.flag} ${t2.name}</div></div>` : ''}
+              ${t3 ? `<div style="text-align:center"><div style="font-size:22px">🥉</div><div style="font-size:13px;font-weight:600">${t3.flag} ${t3.name}</div></div>` : ''}
+            </div>
+          </div>`;
+      }
+
+      // Contador de predicciones
+      const totalGroupMatches = groupMatches.length;
+      const koMatchIds = ['R32-1','R32-2','R32-3','R32-4','R32-5','R32-6','R32-7','R32-8','R32-9','R32-10','R32-11','R32-12','R32-13','R32-14','R32-15','R32-16','QF-1','QF-2','QF-3','QF-4','QF-5','QF-6','QF-7','QF-8','SF-1','SF-2','SF-3','SF-4','SF-5','SF-6','TP','FINAL'];
+      const filledKo = koMatchIds.filter(id => this.predictions[id] && (this.predictions[id].pred_winner != null || this.predictions[id].pred_home != null)).length;
+
+      container.innerHTML = `
+        <div style="margin-bottom:12px;padding:10px 14px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius-md);font-size:13px">
+          <strong style="color:var(--color-primary)">📊 Resumen:</strong>
+          Grupos: <strong>${filledGroup}/${totalGroupMatches}</strong> partidos pronosticados ·
+          Eliminatorias: <strong>${filledKo}/${koMatchIds.length}</strong> llaves completadas
+        </div>
+        <h3 style="font-size:14px;color:var(--color-primary);margin:16px 0 8px">Fase de Grupos</h3>
+        <div class="fixture-groups-grid">${groupsHtml}</div>
+        ${best8Html}
+        <h3 style="font-size:14px;color:var(--color-primary);margin:20px 0 8px">Eliminatorias</h3>
+        <div class="pw-scroll-hint">← Desliza horizontalmente para ver tu bracket →</div>
+        <div class="pw-bracket-wrapper">${myBracketHtml}</div>
+        ${podiumHtml}
+      `;
+    } catch (e) {
+      container.innerHTML = `<div style="text-align:center;color:var(--color-error);padding:2rem">Error al cargar: ${e.message}</div>`;
+    }
+  },
+
+  // ── COMPARARME CON OTRO JUGADOR ─────────────────────────────────────────────
+
+  async showCompare(rivalId, rivalName) {
+    document.getElementById('compare-modal')?.remove();
+    const modal = document.createElement('div');
+    modal.id = 'compare-modal';
+    modal.innerHTML = `
+      <style>
+        #compare-modal { position:fixed;inset:0;z-index:8002;background:rgba(0,0,0,0.85);display:flex;align-items:flex-start;justify-content:center;padding:20px 10px;overflow-y:auto; }
+        #compare-modal .cmp-panel { width:min(700px,100%);background:var(--color-background,#101018);border:1px solid var(--color-border);border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,0.5); }
+        #compare-modal .cmp-head { display:flex;justify-content:space-between;align-items:center;padding:13px 16px;border-bottom:1px solid var(--color-border); }
+        #compare-modal .cmp-close { background:transparent;border:1px solid var(--color-border);color:var(--color-text-muted);font-size:14px;cursor:pointer;border-radius:8px;padding:5px 10px; }
+        #compare-modal .cmp-body { padding:14px 16px 20px; }
+        #compare-modal .cmp-scores { display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap; }
+        #compare-modal .cmp-score-box { flex:1;min-width:120px;text-align:center;padding:10px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:10px; }
+        #compare-modal .cmp-score-box.me { border-color:rgba(201,168,76,0.4); }
+        #compare-modal .cmp-section-title { font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;margin:12px 0 6px;display:flex;align-items:center;gap:6px; }
+        #compare-modal table.cmp-t { width:100%;border-collapse:collapse;font-size:12px; }
+        #compare-modal table.cmp-t th { font-size:10px;color:var(--color-text-muted);font-weight:500;padding:3px 6px;border-bottom:1px solid var(--color-border); }
+        #compare-modal table.cmp-t td { padding:4px 6px;border-bottom:1px solid rgba(255,255,255,0.04); }
+        #compare-modal table.cmp-t tr:last-child td { border-bottom:none; }
+        #compare-modal .cmp-matches { display:flex; flex-direction:column; gap:4px; }
+        #compare-modal .cmp-match-row { padding:6px 8px; background:var(--color-surface); border:1px solid var(--color-border); border-radius:8px; }
+        #compare-modal .cmp-match-teams { font-size:12px; margin-bottom:4px; }
+        #compare-modal .cmp-match-data { display:flex; align-items:center; gap:10px; flex-wrap:wrap; font-size:11px; }
+        #compare-modal .cmp-pred-pair { display:inline-flex; align-items:center; gap:3px; }
+        #compare-modal .cmp-net { margin-left:auto; white-space:nowrap; }
+        @media(max-width:480px){
+          #compare-modal .cmp-match-data { gap:8px; }
+          #compare-modal .cmp-net { margin-left:0; width:100%; padding-top:2px; }
+        }
+        #compare-modal .cmp-net-5 { color:#C9A84C;font-weight:700; }
+        #compare-modal .cmp-net-pos { color:#4ade80;font-weight:600; }
+        #compare-modal .cmp-net-0 { color:var(--color-text-muted); }
+        #compare-modal .cmp-alert { padding:10px 12px;border-radius:8px;font-size:12px;margin-bottom:10px; }
+        #compare-modal .cmp-alert.good { background:rgba(74,222,128,0.08);border:1px solid rgba(74,222,128,0.2);color:#4ade80; }
+        #compare-modal .cmp-alert.warn { background:rgba(251,191,36,0.08);border:1px solid rgba(251,191,36,0.2);color:#fbbf24; }
+        #compare-modal .cmp-alert.bad { background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.2);color:#f87171; }
+      </style>
+      <div class="cmp-panel">
+        <div class="cmp-head">
+          <div style="font-weight:700;font-size:15px">⚔️ Tú vs <span style="color:var(--color-primary)">${rivalName}</span></div>
+          <button class="cmp-close" onclick="document.getElementById('compare-modal').remove()">✕ Cerrar</button>
+        </div>
+        <div class="cmp-body" id="compare-content">
+          <div style="text-align:center;color:var(--color-text-muted);padding:2rem">Calculando...</div>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+    modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+
+    const container = document.getElementById('compare-content');
+    try {
+      const data = await this.api(`/users/${rivalId}/compare`);
+      const { me, rival, gap, canCatchUp, gold, silver, neutral, totalPending } = data;
+
+      const alertClass = gap <= 0 ? 'good' : canCatchUp ? 'warn' : 'bad';
+      const alertMsg = gap <= 0
+        ? `🎉 Ya le vas ganando por ${Math.abs(gap)} pts.`
+        : canCatchUp
+        ? `⚠️ Te lleva ${gap} pts. Puedes alcanzarlo si salen tus exactos — máxima ganancia neta posible: ${gold.length * 5 + silver.reduce((s,m) => s+m.net_gain,0)} pts.`
+        : `❌ Te lleva ${gap} pts y matemáticamente es difícil alcanzarlo solo con grupos.`;
+
+      const renderTable = (matches, emptyMsg) => {
+        if (!matches.length) return `<div style="font-size:12px;color:var(--color-text-muted);padding:6px 0">${emptyMsg}</div>`;
+        return `<div class="cmp-matches">${matches.map(m => `
+          <div class="cmp-match-row">
+            <div class="cmp-match-teams">${m.home_flag} ${m.home_name} <span style="color:var(--color-text-muted);font-size:10px">vs</span> ${m.away_flag} ${m.away_name}</div>
+            <div class="cmp-match-data">
+              <span class="cmp-pred-pair"><span style="color:var(--color-text-muted);font-size:10px">Yo</span> <strong>${m.my_pred}</strong></span>
+              <span class="cmp-pred-pair"><span style="color:var(--color-text-muted);font-size:10px">Él</span> ${m.rival_pred}</span>
+              <span class="cmp-net ${m.net_gain === 5 ? 'cmp-net-5' : m.net_gain > 0 ? 'cmp-net-pos' : 'cmp-net-0'}">+5/+${m.rival_pts} <strong>(+${m.net_gain})</strong></span>
+            </div>
+          </div>`).join('')}</div>`;
+      };
+
+      container.innerHTML = `
+        <div class="cmp-scores">
+          <div class="cmp-score-box me">
+            <div style="font-size:11px;color:var(--color-text-muted)">Tú</div>
+            <div style="font-size:22px;font-weight:700;color:var(--color-primary)">${me.points}</div>
+            <div style="font-size:10px;color:var(--color-text-muted)">pts actuales</div>
+          </div>
+          <div style="display:flex;align-items:center;font-size:20px;color:var(--color-text-muted)">⚔️</div>
+          <div class="cmp-score-box">
+            <div style="font-size:11px;color:var(--color-text-muted)">${rival.display_name.split(' ')[0]}</div>
+            <div style="font-size:22px;font-weight:700">${rival.points}</div>
+            <div style="font-size:10px;color:var(--color-text-muted)">pts actuales</div>
+          </div>
+        </div>
+        <div class="cmp-alert ${alertClass}">${alertMsg}</div>
+        <div class="cmp-section-title" style="color:#C9A84C">🏆 Partidos de oro — Si sale mi exacto: yo +5, él 0 (${gold.length})</div>
+        ${renderTable(gold, 'No hay partidos donde solo tú sumes 5.')}
+        <div class="cmp-section-title" style="color:#4ade80">📈 Ventaja parcial — Si sale mi exacto: yo +5, él algo menos (${silver.length})</div>
+        ${renderTable(silver, 'No hay partidos con ventaja parcial.')}
+        <div class="cmp-section-title" style="color:var(--color-text-muted)">🤝 Pronóstico idéntico — No mueve la brecha (${neutral.length})</div>
+        ${renderTable(neutral, 'Sin pronósticos idénticos.')}
+        <div style="font-size:11px;color:var(--color-text-muted);margin-top:10px;padding-top:8px;border-top:1px solid var(--color-border)">
+          Análisis basado en ${totalPending} partidos pendientes de fase de grupos. Los puntos de eliminatorias no están incluidos.
+        </div>`;
+    } catch(e) {
+      container.innerHTML = `<div style="color:var(--color-danger);padding:1rem">⚠️ ${e.message}</div>`;
+    }
+  },
+
+  // ── DETALLE DE PUNTOS (partido a partido) ──────────────────────────────────
+
+  async showPointsBreakdown(userId, displayName) {
+    document.getElementById('pts-breakdown-modal')?.remove();
+
+    const modal = document.createElement('div');
+    modal.id = 'pts-breakdown-modal';
+    modal.innerHTML = `
+      <style>
+        #pts-breakdown-modal { position:fixed;inset:0;z-index:8001;background:rgba(0,0,0,0.85);display:flex;align-items:flex-start;justify-content:center;padding:20px 10px;overflow-y:auto; }
+        #pts-breakdown-modal .pbm-panel { width:min(680px,100%);background:var(--color-background,#101018);border:1px solid var(--color-border);border-radius:14px;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.5); }
+        #pts-breakdown-modal .pbm-head { display:flex;justify-content:space-between;align-items:center;padding:13px 16px;border-bottom:1px solid var(--color-border);flex-shrink:0; }
+        #pts-breakdown-modal .pbm-title { font-weight:700;font-size:15px; }
+        #pts-breakdown-modal .pbm-close { background:transparent;border:1px solid var(--color-border);color:var(--color-text-muted);font-size:14px;cursor:pointer;border-radius:8px;padding:5px 10px; }
+        #pts-breakdown-modal .pbm-body { padding:14px 16px 20px;overflow-y:auto;max-height:80vh; }
+        #pts-breakdown-modal .pbm-summary { display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px; }
+        #pts-breakdown-modal .pbm-chip { padding:6px 12px;border-radius:20px;font-size:12px;font-weight:600;background:var(--color-surface);border:1px solid var(--color-border); }
+        #pts-breakdown-modal .pbm-chip.total { background:rgba(201,168,76,0.12);border-color:rgba(201,168,76,0.35);color:var(--color-primary); }
+        #pts-breakdown-modal table.pbm-t { width:100%;border-collapse:collapse;font-size:12px; }
+        #pts-breakdown-modal table.pbm-t th { font-size:10px;color:var(--color-text-muted);font-weight:500;padding:4px 6px;text-align:left;border-bottom:1px solid var(--color-border); }
+        #pts-breakdown-modal table.pbm-t td { padding:5px 6px;border-bottom:1px solid rgba(255,255,255,0.04);vertical-align:middle; }
+        #pts-breakdown-modal table.pbm-t tr:last-child td { border-bottom:none; }
+        #pts-breakdown-modal .pbm-pts-5 { color:#C9A84C;font-weight:700; }
+        #pts-breakdown-modal .pbm-pts-3 { color:#60a5fa;font-weight:600; }
+        #pts-breakdown-modal .pbm-pts-2 { color:#4ade80;font-weight:600; }
+        #pts-breakdown-modal .pbm-pts-0 { color:var(--color-text-muted); }
+        #pts-breakdown-modal .pbm-badge { display:inline-block;padding:1px 6px;border-radius:8px;font-size:10px;font-weight:600; }
+        #pts-breakdown-modal .pbm-badge.exacto { background:rgba(201,168,76,0.15);color:#C9A84C; }
+        #pts-breakdown-modal .pbm-badge.gdif { background:rgba(96,165,250,0.15);color:#60a5fa; }
+        #pts-breakdown-modal .pbm-badge.ganador { background:rgba(74,222,128,0.15);color:#4ade80; }
+        #pts-breakdown-modal .pbm-badge.fallo { background:rgba(255,255,255,0.06);color:var(--color-text-muted); }
+      </style>
+      <div class="pbm-panel">
+        <div class="pbm-head">
+          <div class="pbm-title">📊 Puntos de <span style="color:var(--color-primary)">${displayName}</span></div>
+          <button class="pbm-close" onclick="document.getElementById('pts-breakdown-modal').remove()">✕ Cerrar</button>
+        </div>
+        <div class="pbm-body" id="pts-breakdown-content">
+          <div style="text-align:center;color:var(--color-text-muted);padding:2rem">Cargando...</div>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+    modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+
+    const container = document.getElementById('pts-breakdown-content');
+    try {
+      const data = await this.api(`/users/${userId}/points-breakdown`);
+      const { matches } = data;
+
+      if (!matches.length) {
+        container.innerHTML = `<div style="text-align:center;padding:2rem;color:var(--color-text-muted)">Aún no hay partidos puntuados.</div>`;
+        return;
+      }
+
+      const total = matches.reduce((s, m) => s + m.pts, 0);
+      const exactos = matches.filter(m => m.category === 'exacto').length;
+      const gdif = matches.filter(m => m.category === 'g+dif').length;
+      const ganador = matches.filter(m => m.category === 'ganador').length;
+      const fallos = matches.filter(m => m.category === 'fallo').length;
+
+      const catLabel = { exacto: 'Exacto', 'g+dif': 'G+Dif', ganador: 'Ganador', fallo: 'Fallo' };
+      const catClass = { exacto: 'exacto', 'g+dif': 'gdif', ganador: 'ganador', fallo: 'fallo' };
+      const ptsClass = { exacto: 'pbm-pts-5', 'g+dif': 'pbm-pts-3', ganador: 'pbm-pts-2', fallo: 'pbm-pts-0' };
+
+      const rows = matches.map(m => {
+        const predStr = m.pred_home != null ? `${m.pred_home}-${m.pred_away}` : (m.pred_winner || '—');
+        const realStr = `${m.real_home}-${m.real_away}`;
+        const grpLabel = m.phase === 'groups' ? `Gr.${m.group_name}` : m.phase.toUpperCase();
+        return `<tr>
+          <td style="color:var(--color-text-muted);font-size:10px;white-space:nowrap">${m.match_date?.slice(5,10) || ''}<br><span style="font-size:9px">${grpLabel}</span></td>
+          <td style="white-space:nowrap">${m.home_flag} ${m.home_name}</td>
+          <td style="text-align:center;font-size:11px;white-space:nowrap">
+            <span style="background:var(--color-surface);padding:1px 5px;border-radius:4px;font-weight:600">${realStr}</span>
+          </td>
+          <td style="white-space:nowrap">${m.away_flag} ${m.away_name}</td>
+          <td style="text-align:center;color:var(--color-text-muted)">${predStr}</td>
+          <td style="text-align:center"><span class="pbm-badge ${catClass[m.category]}">${catLabel[m.category]}</span></td>
+          <td style="text-align:right" class="${ptsClass[m.category]}">${m.pts > 0 ? '+' + m.pts : '0'}</td>
+        </tr>`;
+      }).join('');
+
+      container.innerHTML = `
+        <div class="pbm-summary">
+          <div class="pbm-chip total">🏆 Total: ${total} pts</div>
+          <div class="pbm-chip">🎯 Exactos: ${exactos}</div>
+          <div class="pbm-chip">📏 G+Dif: ${gdif}</div>
+          <div class="pbm-chip">✅ Ganador: ${ganador}</div>
+          <div class="pbm-chip">❌ Fallos: ${fallos}</div>
+        </div>
+        <table class="pbm-t">
+          <thead><tr>
+            <th>Fecha</th><th>Local</th><th style="text-align:center">Resultado</th><th>Visitante</th>
+            <th style="text-align:center">Mi pronóstico</th><th style="text-align:center">Categoría</th>
+            <th style="text-align:right">Pts</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>`;
+    } catch(e) {
+      container.innerHTML = `<div style="color:var(--color-danger);padding:1rem">⚠️ ${e.message}</div>`;
+    }
+  },
+
+  // ── VER PRONÓSTICOS DE OTRO USUARIO ────────────────────────────────────────
+
+  async showUserPredictions(userId) {
+    const displayName = (this._lbNames && this._lbNames[userId]) || 'Participante';
+    document.getElementById('user-pred-modal')?.remove();
+
+    const modal = document.createElement('div');
+    modal.id = 'user-pred-modal';
+    modal.innerHTML = `
+      <style>
+        #user-pred-modal { position:fixed; inset:0; z-index:8000; background:rgba(0,0,0,0.82); display:flex; align-items:flex-start; justify-content:center; padding:20px 10px; overflow-y:auto; }
+        #user-pred-modal .updm-panel { width:min(980px,100%); background:var(--color-background, #101018); border:1px solid var(--color-border); border-radius:14px; display:flex; flex-direction:column; max-height:calc(100vh - 40px); box-shadow:0 20px 60px rgba(0,0,0,0.5); }
+        #user-pred-modal .updm-head { display:flex; justify-content:space-between; align-items:center; gap:10px; padding:13px 16px; border-bottom:1px solid var(--color-border); flex-shrink:0; }
+        #user-pred-modal .updm-title { font-weight:700; font-size:15px; }
+        #user-pred-modal .updm-close { background:transparent; border:1px solid var(--color-border); color:var(--color-text-muted); font-size:15px; cursor:pointer; line-height:1; border-radius:8px; padding:5px 10px; }
+        #user-pred-modal .updm-close:hover { color:var(--color-text); }
+        #user-pred-modal .updm-body { padding:14px 16px 20px; overflow-y:auto; }
+        #user-pred-modal h3.updm-h { font-size:13px; color:var(--color-primary); margin:18px 0 8px; text-transform:uppercase; letter-spacing:0.5px; }
+        #user-pred-modal h3.updm-h:first-child { margin-top:0; }
+        #user-pred-modal .updm-summary { padding:9px 12px; background:var(--color-surface); border:1px solid var(--color-border); border-radius:10px; font-size:12.5px; margin-bottom:4px; }
+        #user-pred-modal .updm-note { padding:8px 12px; background:rgba(201,168,76,0.07); border:1px solid rgba(201,168,76,0.2); border-radius:10px; font-size:12px; color:var(--color-text-muted); margin:10px 0 0; }
+        #user-pred-modal .updm-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(225px,1fr)); gap:8px; }
+        #user-pred-modal .updm-card { background:var(--color-surface); border:1px solid var(--color-border); border-radius:10px; padding:8px; }
+        #user-pred-modal .updm-gtitle { font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:6px; }
+        #user-pred-modal table.updm-t { width:100%; border-collapse:collapse; font-size:12px; }
+        #user-pred-modal table.updm-t th { font-size:10px; color:var(--color-text-muted); font-weight:500; padding:2px 4px; text-align:left; }
+        #user-pred-modal table.updm-t td { padding:3px 4px; white-space:nowrap; }
+        #user-pred-modal .updm-scores { margin-top:8px; padding-top:6px; border-top:1px solid var(--color-border); }
+        #user-pred-modal .updm-scores-title { font-size:10px; font-weight:600; color:var(--color-text-muted); margin-bottom:4px; text-transform:uppercase; letter-spacing:0.5px; }
+        #user-pred-modal .updm-mrow { display:flex; align-items:center; gap:4px; font-size:11px; padding:2px 0; }
+        #user-pred-modal .updm-mrow .l { flex:1; text-align:right; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        #user-pred-modal .updm-mrow .r { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        #user-pred-modal .updm-mrow .s { font-weight:700; min-width:34px; text-align:center; background:var(--color-background-secondary, rgba(255,255,255,0.05)); border-radius:4px; padding:1px 4px; flex-shrink:0; }
+        #user-pred-modal .updm-bwrap { width:100%; overflow-x:auto; padding-bottom:8px; -webkit-overflow-scrolling:touch; }
+        #user-pred-modal .updm-bracket { display:flex; gap:0; min-height:560px; align-items:stretch; min-width:1100px; }
+        #user-pred-modal .updm-side { display:flex; flex-direction:row; gap:6px; flex:1; }
+        #user-pred-modal .updm-right { justify-content:flex-end; }
+        #user-pred-modal .updm-col { display:flex; flex-direction:column; min-width:140px; flex-shrink:0; }
+        #user-pred-modal .updm-clabel { font-size:10px; font-weight:700; color:var(--color-primary); text-transform:uppercase; letter-spacing:0.5px; text-align:center; padding:4px 0 8px; }
+        #user-pred-modal .updm-cmatches { display:flex; flex-direction:column; justify-content:space-around; flex:1; gap:4px; }
+        #user-pred-modal .updm-center { display:flex; flex-direction:column; align-items:center; justify-content:center; min-width:160px; flex-shrink:0; padding:0 8px; border-left:1px solid var(--color-border); border-right:1px solid var(--color-border); }
+        #user-pred-modal .updm-center .updm-bk { width:100%; }
+        #user-pred-modal .updm-bk { background:var(--color-surface); border:1px solid var(--color-border); border-radius:10px; overflow:hidden; margin-bottom:4px; }
+        #user-pred-modal .updm-bk.played { border-color:rgba(201,168,76,0.35); }
+        #user-pred-modal .updm-bk.empty { padding:8px; font-size:11px; color:var(--color-text-muted); font-style:italic; text-align:center; }
+        #user-pred-modal .updm-team { display:flex; align-items:center; gap:5px; padding:4px 7px; font-size:11px; border-bottom:1px solid var(--color-border); }
+        #user-pred-modal .updm-team:last-child { border-bottom:none; }
+        #user-pred-modal .updm-team.winner { background:rgba(201,168,76,0.1); font-weight:700; color:var(--color-primary); }
+        #user-pred-modal .updm-team.loser { opacity:0.4; }
+        #user-pred-modal .updm-flag { font-size:13px; flex-shrink:0; }
+        #user-pred-modal .updm-name { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        #user-pred-modal .updm-score { font-weight:700; font-size:12px; flex-shrink:0; }
+        #user-pred-modal .updm-hint { font-size:11px; color:var(--color-text-muted); text-align:center; padding:4px 0; font-style:italic; }
+        @media(min-width:1200px){ #user-pred-modal .updm-hint { display:none; } }
+        #user-pred-modal .updm-podium { margin-top:14px; padding:10px; background:var(--color-surface); border:1px solid var(--color-border); border-radius:10px; }
+        #user-pred-modal .updm-chips { display:flex; flex-wrap:wrap; gap:6px; }
+        #user-pred-modal .updm-chip { font-size:12px; padding:3px 8px; background:rgba(201,168,76,0.1); border:1px solid rgba(201,168,76,0.25); border-radius:12px; }
+      </style>
+      <div class="updm-panel">
+        <div class="updm-head">
+          <div class="updm-title">👁 Pronósticos de <span style="color:var(--color-primary)">${displayName}</span></div>
+          <button class="updm-close" onclick="document.getElementById('user-pred-modal').remove()">✕ Cerrar</button>
+        </div>
+        <div class="updm-body" id="user-pred-content">
+          <div style="text-align:center;color:var(--color-text-muted);padding:2rem">Cargando pronósticos...</div>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+    modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+
+    const container = document.getElementById('user-pred-content');
+    try {
+      const [classified, otherPredsArr, podiumData] = await Promise.all([
+        this.api(`/predictions/classified?userId=${userId}`),
+        this.api(`/predictions?userId=${userId}`),
+        this.api(`/podium?userId=${userId}`).catch(() => null)
+      ]);
+
+      // Mapa LOCAL — nunca tocamos this.predictions
+      const upreds = Object.fromEntries(otherPredsArr.map(p => [p.match_id, p]));
+
+      const groupColors = { A:'#1a5c8a',B:'#6b21a8',C:'#166534',D:'#991b1b',E:'#0f766e',F:'#92400e',G:'#5b21b6',H:'#1e40af',I:'#9d174d',J:'#065f46',K:'#7c2d12',L:'#164e63' };
+      const groupMatches = this.matches.filter(m => m.phase === 'groups');
+      const filledGroup = groupMatches.filter(m => upreds[m.id] && upreds[m.id].pred_home != null).length;
+
+      if (filledGroup === 0) {
+        container.innerHTML = `<div style="text-align:center;padding:2rem;color:var(--color-text-muted)">📝 ${displayName} aún no tiene pronósticos registrados.</div>`;
+        return;
+      }
+
+      const matchesByGroup = {};
+      groupMatches.forEach(m => { (matchesByGroup[m.group_name] = matchesByGroup[m.group_name] || []).push(m); });
+
+      const groupsHtml = Object.keys(classified.groups).sort().map(g => {
+        const standings = classified.groups[g];
+        const color = groupColors[g] || '#C9A84C';
+        const rows = (matchesByGroup[g] || []).map(m => {
+          const p = upreds[m.id];
+          const home = this.teamByCode(m.home_team);
+          const away = this.teamByCode(m.away_team);
+          const has = p && p.pred_home != null && p.pred_away != null;
+          return `<div class="updm-mrow"${has?'':' style="opacity:0.4"'}>
+            <span class="l">${home.flag} ${home.name}</span>
+            <span class="s">${has ? p.pred_home + '-' + p.pred_away : '–'}</span>
+            <span class="r">${away.flag} ${away.name}</span>
+          </div>`;
+        }).join('');
+        return `<div class="updm-card" style="border-left:3px solid ${color}">
+          <div class="updm-gtitle" style="color:${color}">Grupo ${g}</div>
+          <table class="updm-t">
+            <thead><tr><th></th><th>Equipo</th><th>PJ</th><th>Pts</th><th>GD</th></tr></thead>
+            <tbody>${standings.map((t,i)=>`<tr>
+              <td style="font-size:11px;color:var(--color-text-muted)">${i+1}</td>
+              <td><span style="margin-right:4px">${t.team_info.flag}</span>${t.team_info.name}</td>
+              <td style="text-align:center">${t.played}</td>
+              <td style="text-align:center;font-weight:${t.classified?'700':'400'}">${t.pts}</td>
+              <td style="text-align:center">${t.gd>0?'+':''}${t.gd}</td>
+            </tr>`).join('')}</tbody>
+          </table>
+          <div class="updm-scores">
+            <div class="updm-scores-title">Marcadores</div>
+            ${rows}
+          </div>
+        </div>`;
+      }).join('');
+
+      const best8Html = (classified.best8Thirds && classified.best8Thirds.length) ? `
+        <div class="updm-card" style="margin-top:10px">
+          <div class="updm-gtitle" style="color:var(--color-primary)">Sus 8 mejores terceros</div>
+          <div class="updm-chips">${classified.best8Thirds.map(t=>`<span class="updm-chip">${t.flag} ${t.name}</span>`).join('')}</div>
+        </div>` : '';
+
+      // ── Bracket: equipos reales + cascada con los pronósticos de ESTE usuario ──
+      const matchesById = {};
+      this.matches.forEach(m => { matchesById[m.id] = m; });
+      const QF = {'QF-1':['R32-2','R32-6'],'QF-2':['R32-1','R32-3'],'QF-3':['R32-4','R32-5'],'QF-4':['R32-7','R32-8'],'QF-5':['R32-11','R32-12'],'QF-6':['R32-9','R32-10'],'QF-7':['R32-15','R32-14'],'QF-8':['R32-13','R32-16']};
+      const SF = {'SF-1':['QF-1','QF-2'],'SF-2':['QF-3','QF-4'],'SF-3':['QF-5','QF-6'],'SF-4':['QF-7','QF-8'],'SF-5':['SF-1','SF-2'],'SF-6':['SF-3','SF-4']};
+      const memo = {};
+      const winOf = (id, h, a) => {
+        const p = upreds[id];
+        if (!p) return null;
+        const ph = p.pred_home != null ? parseInt(p.pred_home) : null;
+        const pa = p.pred_away != null ? parseInt(p.pred_away) : null;
+        if (ph != null && pa != null && ph !== pa) return ph > pa ? h : a;
+        return p.pred_winner || null;
+      };
+      const resolve = (id) => {
+        if (memo[id]) return memo[id];
+        let h = null, a = null;
+        if (id.startsWith('R32')) { const m = matchesById[id]; h = m?.home_team || null; a = m?.away_team || null; }
+        else if (QF[id]) { const [x,y]=QF[id]; const rx=resolve(x), ry=resolve(y); h=winOf(x,rx.h,rx.a); a=winOf(y,ry.h,ry.a); }
+        else if (SF[id]) { const [x,y]=SF[id]; const rx=resolve(x), ry=resolve(y); h=winOf(x,rx.h,rx.a); a=winOf(y,ry.h,ry.a); }
+        else if (id === 'FINAL') { const rx=resolve('SF-5'), ry=resolve('SF-6'); h=winOf('SF-5',rx.h,rx.a); a=winOf('SF-6',ry.h,ry.a); }
+        else if (id === 'TP') { const rx=resolve('SF-5'), ry=resolve('SF-6'); const w5=winOf('SF-5',rx.h,rx.a), w6=winOf('SF-6',ry.h,ry.a); h=w5?(w5===rx.h?rx.a:rx.h):null; a=w6?(w6===ry.h?ry.a:ry.h):null; }
+        memo[id] = { h, a };
+        return memo[id];
+      };
+      const card = (id) => {
+        const { h, a } = resolve(id);
+        const ht = h ? this.teamByCode(h) : null;
+        const at = a ? this.teamByCode(a) : null;
+        const p = upreds[id];
+        const has = !!(p && (p.pred_home != null || p.pred_winner != null));
+        const pw = (h && a) ? winOf(id, h, a) : null;
+        const ss = p && p.pred_home != null;
+        const pH = p && p.pred_pen_home != null ? `(${p.pred_pen_home})` : '';
+        const pA = p && p.pred_pen_away != null ? `(${p.pred_pen_away})` : '';
+        if (!ht && !at) return `<div class="updm-bk empty">Por definir</div>`;
+        return `<div class="updm-bk${has ? ' played' : ''}">
+          <div class="updm-team ${pw&&ht&&pw===ht.code?'winner':pw&&ht?'loser':''}">
+            <span class="updm-flag">${ht?.flag||'?'}</span><span class="updm-name">${ht?.name||'Por definir'}</span>${ss?`<span class="updm-score">${p.pred_home}${pH}</span>`:''}
+          </div>
+          <div class="updm-team ${pw&&at&&pw===at.code?'winner':pw&&at?'loser':''}">
+            <span class="updm-flag">${at?.flag||'?'}</span><span class="updm-name">${at?.name||'Por definir'}</span>${ss?`<span class="updm-score">${p.pred_away}${pA}</span>`:''}
+          </div>
+        </div>`;
+      };
+      const col = (ids, label) => `<div class="updm-col"><div class="updm-clabel">${label}</div><div class="updm-cmatches">${ids.map(card).join('')}</div></div>`;
+      const bracketHtml = `<div class="updm-bracket">
+        <div class="updm-side">${col(['R32-1','R32-2','R32-3','R32-4','R32-5','R32-6','R32-7','R32-8'],'Dieciseisavos')}${col(['QF-1','QF-2','QF-3','QF-4'],'Octavos')}${col(['SF-1','SF-2'],'Cuartos')}${col(['SF-5'],'Semis')}</div>
+        <div class="updm-center"><div class="updm-clabel">Gran Final</div>${card('FINAL')}<div class="updm-clabel" style="margin-top:16px">3er Puesto</div>${card('TP')}</div>
+        <div class="updm-side updm-right">${col(['SF-6'],'Semis')}${col(['SF-3','SF-4'],'Cuartos')}${col(['QF-5','QF-6','QF-7','QF-8'],'Octavos')}${col(['R32-9','R32-10','R32-11','R32-12','R32-13','R32-14','R32-15','R32-16'],'Dieciseisavos')}</div>
+      </div>`;
+
+      // Si la Polla 2 sigue abierta, el servidor oculta los picks de eliminatorias de otros
+      const koNote = (!this.user.is_admin && this.lockStatus && !this.lockStatus.polla2Locked)
+        ? `<div class="updm-note">🔒 Los pronósticos de eliminatorias de otros participantes serán visibles cuando cierre la Polla 2.</div>` : '';
+
+      let podiumHtml = '';
+      if (podiumData?.first_place) {
+        const t1 = this.teamByCode(podiumData.first_place);
+        const t2 = podiumData.second_place ? this.teamByCode(podiumData.second_place) : null;
+        const t3 = podiumData.third_place ? this.teamByCode(podiumData.third_place) : null;
+        podiumHtml = `<div class="updm-podium">
+          <div class="updm-gtitle" style="color:var(--color-primary)">Podio pronosticado</div>
+          <div style="display:flex;justify-content:center;gap:18px;flex-wrap:wrap">
+            <div style="text-align:center"><div style="font-size:22px">🥇</div><div style="font-size:13px;font-weight:700">${t1.flag} ${t1.name}</div></div>
+            ${t2?`<div style="text-align:center"><div style="font-size:22px">🥈</div><div style="font-size:13px">${t2.flag} ${t2.name}</div></div>`:''}
+            ${t3?`<div style="text-align:center"><div style="font-size:22px">🥉</div><div style="font-size:13px">${t3.flag} ${t3.name}</div></div>`:''}
+          </div>
+        </div>`;
+      }
+
+      container.innerHTML = `
+        <div class="updm-summary"><strong style="color:var(--color-primary)">📊</strong> Grupos: <strong>${filledGroup}/${groupMatches.length}</strong> partidos pronosticados</div>
+        <h3 class="updm-h">Fase de Grupos</h3>
+        <div class="updm-grid">${groupsHtml}</div>
+        ${best8Html}
+        <h3 class="updm-h">Eliminatorias</h3>
+        <div class="updm-hint">← Desliza horizontalmente para ver el bracket →</div>
+        <div class="updm-bwrap">${bracketHtml}</div>
+        ${koNote}
+        ${podiumHtml}`;
+    } catch (e) {
+      container.innerHTML = `<div style="text-align:center;color:var(--color-danger);padding:1.5rem">⚠️ ${e.message}</div>`;
+    }
   },
 
   // ── HOY ────────────────────────────────────────────────────────────────────
@@ -761,14 +1670,86 @@ const app = {
 
   // ── ELIMINATORIAS ───────────────────────────────────────────────────────────
 
+  koFeederLabel(matchId) {
+    const QF_PAIRS = { 'QF-1': ['R32-2','R32-6'], 'QF-2': ['R32-1','R32-3'], 'QF-3': ['R32-4','R32-5'], 'QF-4': ['R32-7','R32-8'], 'QF-5': ['R32-11','R32-12'], 'QF-6': ['R32-9','R32-10'], 'QF-7': ['R32-15','R32-14'], 'QF-8': ['R32-13','R32-16'] };
+    const SF_PAIRS = { 'SF-1': ['QF-1','QF-2'], 'SF-2': ['QF-3','QF-4'], 'SF-3': ['QF-5','QF-6'], 'SF-4': ['QF-7','QF-8'], 'SF-5': ['SF-1','SF-2'], 'SF-6': ['SF-3','SF-4'] };
+    const pretty = (id) => {
+      if (id.startsWith('R32')) return 'Dieciseisavos ' + id.replace('R32-','');
+      if (id.startsWith('QF')) return 'Octavos ' + id.replace('QF-','');
+      if (['SF-1','SF-2','SF-3','SF-4'].includes(id)) return 'Cuartos ' + id.replace('SF-','');
+      if (['SF-5','SF-6'].includes(id)) return 'Semifinal ' + (id === 'SF-5' ? '1' : '2');
+      return id;
+    };
+    const pair = QF_PAIRS[matchId] || SF_PAIRS[matchId] || (matchId === 'FINAL' ? ['SF-5','SF-6'] : (matchId === 'TP' ? ['SF-5','SF-6'] : null));
+    if (!pair) return 'las rondas anteriores';
+    return pair.map(pretty).join(' y ');
+  },
+
   async renderKnockout(main) {
     main.innerHTML = `<h2>Eliminatorias</h2><div style="color:var(--color-text-muted);font-size:14px">Cargando...</div>`;
 
     const locked = this.lockStatus.polla2Locked || false;
     const koMatches = this.matches.filter(m => m.phase !== 'groups');
 
+    // ── Cascada: derivar equipos de cada ronda desde la predicción del usuario ──
+    // R32 usa equipos reales (cargados por admin). QF en adelante se llena con
+    // el ganador que el usuario predijo en la ronda anterior, para que pueda
+    // pronosticar octavos sin esperar a que el admin cargue los resultados reales.
+    const matchesById = {};
+    this.matches.forEach(m => { matchesById[m.id] = m; });
+
+    const QF_PAIRS  = { 'QF-1': ['R32-2','R32-6'], 'QF-2': ['R32-1','R32-3'], 'QF-3': ['R32-4','R32-5'], 'QF-4': ['R32-7','R32-8'], 'QF-5': ['R32-11','R32-12'], 'QF-6': ['R32-9','R32-10'], 'QF-7': ['R32-15','R32-14'], 'QF-8': ['R32-13','R32-16'] };
+    const SF_PAIRS  = { 'SF-1': ['QF-1','QF-2'], 'SF-2': ['QF-3','QF-4'], 'SF-3': ['QF-5','QF-6'], 'SF-4': ['QF-7','QF-8'], 'SF-5': ['SF-1','SF-2'], 'SF-6': ['SF-3','SF-4'] };
+    const FINAL_PAIR = ['SF-5','SF-6'];
+
+    const koWinnerOf = (matchId, homeCode, awayCode) => {
+      const pred = this.predictions[matchId];
+      if (!pred) return null;
+      const ph = pred.pred_home != null ? parseInt(pred.pred_home) : null;
+      const pa = pred.pred_away != null ? parseInt(pred.pred_away) : null;
+      if (ph != null && pa != null && ph !== pa) return ph > pa ? homeCode : awayCode;
+      // Empate: definir por penales predichos
+      if (ph != null && pa != null && ph === pa) {
+        const pph = pred.pred_pen_home != null ? parseInt(pred.pred_pen_home) : null;
+        const ppa = pred.pred_pen_away != null ? parseInt(pred.pred_pen_away) : null;
+        if (pph != null && ppa != null && pph !== ppa) return pph > ppa ? homeCode : awayCode;
+      }
+      return pred.pred_winner || null;
+    };
+
+    const koResolved = {};
+    const koResolve = (matchId) => {
+      if (koResolved[matchId]) return koResolved[matchId];
+      let homeCode = null, awayCode = null;
+      const real = matchesById[matchId];
+
+      if (matchId.startsWith('R32')) {
+        homeCode = real?.home_team || null;
+        awayCode = real?.away_team || null;
+      } else {
+        const pair = QF_PAIRS[matchId] || SF_PAIRS[matchId] || (matchId === 'FINAL' ? FINAL_PAIR : null);
+        if (pair) {
+          const [a, b] = pair;
+          const ra = koResolve(a), rb = koResolve(b);
+          // Si el admin YA cargó el equipo real en esta llave, ese tiene prioridad.
+          // Si no, usar el ganador que el usuario predijo en la ronda anterior.
+          homeCode = real?.home_team || koWinnerOf(a, ra.homeCode, ra.awayCode);
+          awayCode = real?.away_team || koWinnerOf(b, rb.homeCode, rb.awayCode);
+        } else if (matchId === 'TP') {
+          // Tercer puesto: perdedores de las semifinales (SF-5, SF-6)
+          const r5 = koResolve('SF-5'), r6 = koResolve('SF-6');
+          const w5 = koWinnerOf('SF-5', r5.homeCode, r5.awayCode);
+          const w6 = koWinnerOf('SF-6', r6.homeCode, r6.awayCode);
+          homeCode = real?.home_team || (w5 ? (w5 === r5.homeCode ? r5.awayCode : r5.homeCode) : null);
+          awayCode = real?.away_team || (w6 ? (w6 === r6.homeCode ? r6.awayCode : r6.homeCode) : null);
+        }
+      }
+      koResolved[matchId] = { homeCode, awayCode };
+      return koResolved[matchId];
+    };
+
     let html = `<h2>Eliminatorias</h2>`;
-    html += `<div class="notice">Los equipos se cargan automáticamente con los <strong>resultados reales</strong> de la fase de grupos. Ingresa el marcador de cada partido. Si hay empate aparecerán los campos de penales.${!locked && this.lockStatus.lockTimePolla2Ecuador ? ` Las predicciones se cierran <strong>5 minutos antes del primer partido de dieciseisavos</strong> (${this.lockStatus.lockTimePolla2Ecuador} hora Ecuador).` : ''}</div>`;
+    html += `<div class="notice">Ingresa el marcador de cada partido. Los <strong>dieciseisavos</strong> usan los equipos reales de la fase de grupos; las rondas siguientes se llenan automáticamente con <strong>los ganadores que tú predigas</strong>. Si hay empate aparecerán los campos de penales.${!locked && this.lockStatus.lockTimePolla2Ecuador ? ` Las predicciones se cierran <strong>5 minutos antes del primer partido de dieciseisavos</strong> (${this.lockStatus.lockTimePolla2Ecuador} hora Ecuador).` : ''}</div>`;
     if (locked) {
       html += `<div class="notice" style="background:rgba(224,82,82,0.08);border-color:rgba(224,82,82,0.3);color:var(--color-danger)">Las predicciones de eliminatorias están cerradas.</div>`;
     }
@@ -789,9 +1770,12 @@ const app = {
 
       matches.forEach(m => {
         const pred = this.predictions[m.id] || {};
-        // Usar equipos REALES desde m.home_team/away_team (cargados por admin)
-        const homeTeam = m.home_team ? this.teamByCode(m.home_team) : null;
-        const awayTeam = m.away_team ? this.teamByCode(m.away_team) : null;
+        // Equipos: reales si el admin los cargó, si no derivados de la predicción del usuario
+        const resolved = koResolve(m.id);
+        const homeCode = m.home_team || resolved.homeCode;
+        const awayCode = m.away_team || resolved.awayCode;
+        const homeTeam = homeCode ? this.teamByCode(homeCode) : null;
+        const awayTeam = awayCode ? this.teamByCode(awayCode) : null;
         const timeStr = m.match_time ? `${m.match_date} · ${m.match_time} (ECU)` : m.match_date || '';
         const predHome = pred.pred_home ?? '';
         const predAway = pred.pred_away ?? '';
@@ -811,17 +1795,25 @@ const app = {
           }
         }
 
+        // Normalizar el label: la BD trae prefijos heredados ("Octavos: 1J vs 2H")
+        // que no coinciden con la ronda real. Extraemos el cruce y anteponemos el nombre correcto.
+        const roundNames = { r16: 'Dieciseisavos', qf: 'Octavos', sf: ['SF-1','SF-2','SF-3','SF-4'].includes(m.id) ? 'Cuartos' : 'Semis', tp: 'Tercer puesto', final: 'Final' };
+        const rawLabel = m.label || '';
+        const crossPart = rawLabel.includes(':') ? rawLabel.split(':').slice(1).join(':').trim() : rawLabel;
+        const roundName = roundNames[m.phase] || '';
+        const displayLabel = crossPart ? `${roundName}: ${crossPart}` : (roundName || rawLabel);
+
         html += `
           <div class="card" style="margin-bottom:8px"
             data-ko-match="${m.id}"
-            data-home-code="${homeTeam?.code || ''}"
-            data-away-code="${awayTeam?.code || ''}">
-            <div style="font-size:12px;color:var(--color-text-muted);margin-bottom:8px">${m.label || ''} · ${timeStr}</div>
+            data-home-code="${homeCode || ''}"
+            data-away-code="${awayCode || ''}">
+            <div style="font-size:12px;color:var(--color-text-muted);margin-bottom:8px">${displayLabel} · ${timeStr}</div>
             ${homeTeam || awayTeam ? `
             <div class="match-grid" style="margin-bottom:${isDraw ? '8px' : '0'}">
               <div class="team-cell">
-                <span class="team-flag">${homeTeam?.flag || '?'}</span>
-                <span class="team-name">${homeTeam?.name || '?'}</span>
+                <span class="team-flag">${homeTeam?.flag || '⏳'}</span>
+                <span class="team-name">${homeTeam?.name || 'Por definir'}</span>
               </div>
               <div class="score-inputs">
                 <input type="number" min="0" max="20" class="score-input ko-score" data-match="${m.id}" data-field="home" value="${predHome}" ${locked ? 'disabled' : ''} placeholder="—">
@@ -829,11 +1821,11 @@ const app = {
                 <input type="number" min="0" max="20" class="score-input ko-score" data-match="${m.id}" data-field="away" value="${predAway}" ${locked ? 'disabled' : ''} placeholder="—">
               </div>
               <div class="team-cell away">
-                <span class="team-name">${awayTeam?.name || '?'}</span>
-                <span class="team-flag">${awayTeam?.flag || '?'}</span>
+                <span class="team-name">${awayTeam?.name || 'Por definir'}</span>
+                <span class="team-flag">${awayTeam?.flag || '⏳'}</span>
               </div>
             </div>` : `
-            <div style="font-size:13px;color:var(--color-text-muted);margin-bottom:8px;font-style:italic">Completa rondas anteriores para ver los equipos</div>`}
+            <div style="font-size:13px;color:var(--color-text-muted);margin-bottom:8px;font-style:italic">⏳ Predice ${this.koFeederLabel(m.id)} para habilitar este partido</div>`}
             <div class="ko-pen-section" data-match="${m.id}" style="${isDraw ? '' : 'display:none'}">
               <div style="font-size:12px;color:var(--color-text-muted);margin:8px 0 6px">⚖️ Empate — ingresa el marcador en penales:</div>
               <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -930,9 +1922,27 @@ const app = {
     const body = { match_id: matchId, pred_home: predHome, pred_away: predAway, pred_winner: effectiveWinner, pred_pen_home: predPenHome, pred_pen_away: predPenAway };
     try {
       await this.api('/predictions', { method: 'POST', body: JSON.stringify(body) });
+      const prevWinner = this.predictions[matchId]?.pred_winner;
       this.predictions[matchId] = { ...this.predictions[matchId], ...body };
       this.koTeams = await this.api('/predictions/ko-teams');
       if (homeInput) { homeInput.style.borderColor = 'var(--color-success)'; setTimeout(() => homeInput.style.borderColor = '', 800); }
+      // Re-renderizar para propagar el ganador a la siguiente ronda (cascada).
+      // Se hace cuando el ganador de este partido CAMBIA y alimenta una ronda posterior,
+      // preservando la posición de scroll para no desorientar al usuario.
+      const winnerChanged = prevWinner !== effectiveWinner;
+      const feedsNextRound = matchId !== 'FINAL' && matchId !== 'TP';
+      if (winnerChanged && feedsNextRound) {
+        // Defer breve: si el usuario saltó a otro input de la misma ronda, no interrumpir.
+        // Re-renderizamos solo cuando el foco ya no está en un input de predicción KO.
+        setTimeout(() => {
+          const active = document.activeElement;
+          const stillEditing = active && (active.classList?.contains('ko-score') || active.classList?.contains('ko-pen'));
+          if (!stillEditing) {
+            const scrollY = window.scrollY;
+            this.renderKnockout(main).then(() => window.scrollTo(0, scrollY));
+          }
+        }, 150);
+      }
     } catch (e) {
       if (homeInput) homeInput.style.borderColor = 'var(--color-danger)';
     }
@@ -1280,10 +2290,49 @@ const app = {
   async renderLeaderboard(main) {
     main.innerHTML = '<h2>Ranking</h2><div style="color:var(--color-text-muted)">Cargando...</div>';
     try {
-      const [lb1, lb2] = await Promise.all([
+      const [lb1, lb2, dailyTop] = await Promise.all([
         this.api('/leaderboard/groups'),
-        this.api('/leaderboard/knockout')
+        this.api('/leaderboard/knockout'),
+        this.api('/leaderboard/daily-top').catch(() => null)
       ]);
+
+      // GJ ids del día anterior
+      const gjIds = new Set((dailyTop?.gjIds) || []);
+
+      const renderDailyTop = (daily) => {
+        if (!daily?.hasData || !daily.top.length) return '';
+        const date = daily.date ? new Date(daily.date + 'T12:00:00').toLocaleDateString('es-EC', { weekday:'long', day:'numeric', month:'long' }) : '';
+        const winMedals = ['🥇','🥈','🥉'];
+        const loseMedals = ['😰','😓','😔'];
+
+        const winners = daily.top.map((u, i) => `
+          <div style="display:flex;align-items:center;gap:5px;font-size:11px;padding:2px 0">
+            <span>${winMedals[i]}</span>
+            <span style="font-weight:600">${u.display_name.split(' ')[0]}</span>
+            <span style="font-weight:700;color:var(--color-primary)">${u.pts}pts</span>
+            ${u.exactos > 0 ? `<span style="color:var(--color-text-muted);font-size:10px">🎯${u.exactos}</span>` : ''}
+            ${u.isGJ ? '<span style="color:#C9A84C;font-size:10px;font-weight:700">⭐GJ</span>' : ''}
+          </div>`).join('');
+
+        const losers = (daily.bottom || []).map((u, i) => `
+          <div style="display:flex;align-items:center;gap:5px;font-size:11px;padding:2px 0">
+            <span>${loseMedals[i]}</span>
+            <span style="font-weight:600;color:var(--color-text-muted)">${u.display_name.split(' ')[0]}</span>
+            <span style="font-weight:700;color:var(--color-text-muted)">${u.pts}pts</span>
+          </div>`).join('');
+
+        return `
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
+            <div style="padding:8px 10px;background:var(--color-surface);border:1px solid rgba(201,168,76,0.2);border-radius:8px">
+              <div style="font-size:10px;font-weight:700;color:#C9A84C;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:5px">⭐ Jornada anterior · ${date}</div>
+              ${winners}
+            </div>
+            <div style="padding:8px 10px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:8px">
+              <div style="font-size:10px;font-weight:700;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:5px">🔒 El Calabozo</div>
+              ${losers || '<div style="font-size:11px;color:var(--color-text-muted)">Sin datos</div>'}
+            </div>
+          </div>`;
+      };
 
       const renderTable = (data) => {
         const { leaderboard, totalPot, prizes, splits } = data;
@@ -1300,28 +2349,51 @@ const app = {
             <div class="metric-card"><div class="metric-label">🥈 Premio 2do <small style="font-size:10px">(${sp.second}%)</small></div><div class="metric-value">$${prizes.second.toFixed(2)}</div></div>
             <div class="metric-card"><div class="metric-label">🥉 Premio 3ro <small style="font-size:10px">(${sp.third}%)</small></div><div class="metric-value">$${prizes.third.toFixed(2)}</div></div>
           </div>
+          <div style="overflow-x:auto">
           <table class="leaderboard-table">
-            <thead><tr><th>#</th><th>Participante</th><th style="text-align:center">Aciertos</th><th style="text-align:center">Exactos</th><th style="text-align:right">Puntos</th></tr></thead>
+            <thead><tr>
+              <th>#</th>
+              <th>Participante</th>
+              <th style="text-align:center" title="Marcador exacto (5 pts)">🎯 Exacto</th>
+              <th style="text-align:center" title="Ganador + diferencia de goles correcta (3 pts)">📏 G+Dif</th>
+              <th style="text-align:center" title="Solo ganador correcto (2 pts)">✅ Ganador</th>
+              <th style="text-align:right">Puntos</th>
+            </tr></thead>
             <tbody>
               ${leaderboard.map((u, i) => {
                 const rank = i + 1;
                 const medal = rank===1?'gold':rank===2?'silver':rank===3?'bronze':'default';
                 const init = u.display_name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
                 const isMe = u.user_id === this.user.id || u.id === this.user.id;
+                const uid = u.user_id || u.id;
+                this._lbNames = this._lbNames || {};
+                this._lbNames[uid] = u.display_name;
+                const ex = u.exactScores ?? u.exact ?? 0;
+                const df = u.diffCount ?? 0;
+                const wn = u.winnerCount ?? 0;
                 return `<tr style="${isMe ? 'background:rgba(201,168,76,0.06)' : ''}">
                   <td><span class="rank-medal ${medal}">${rank}</span></td>
-                  <td class="user-cell"><span class="avatar">${init}</span><span>${u.display_name}${isMe ? ' <strong>(tú)</strong>' : ''}</span></td>
-                  <td style="text-align:center">${u.correctPredictions ?? u.correct ?? 0}</td>
-                  <td style="text-align:center">${u.exactScores ?? u.exact ?? 0}</td>
-                  <td style="text-align:right;font-weight:700">${u.points}</td>
+                  <td class="user-cell"><span class="avatar">${init}</span><span>${u.display_name}${isMe ? ' <strong>(tú)</strong>' : ''}${gjIds.has(uid) ? ' <span title="Ganador de la Jornada" style="font-size:11px;background:rgba(201,168,76,0.15);color:#C9A84C;border:1px solid rgba(201,168,76,0.3);border-radius:10px;padding:1px 6px;margin-left:4px">⭐ GJ</span>' : ''}</span>${uid !== this.user.id ? `<button title="Compararme con ${u.display_name.replace(/'/g,"\\'")}" onclick="app.showCompare(${uid},'${u.display_name.replace(/'/g,"\\'")}')" style="margin-left:6px;font-size:12px;padding:2px 8px;border:1px solid rgba(201,168,76,0.4);border-radius:6px;background:transparent;color:#C9A84C;cursor:pointer;flex-shrink:0">⚔️</button>` : ''}<button title="Ver pronósticos" onclick="app.showUserPredictions(${uid})" style="margin-left:4px;font-size:12px;padding:2px 8px;border:1px solid var(--color-border);border-radius:6px;background:transparent;color:var(--color-text-muted);cursor:pointer;flex-shrink:0">👁</button></td>
+                  <td style="text-align:center;font-weight:600;color:var(--color-primary)">${ex}</td>
+                  <td style="text-align:center">${df}</td>
+                  <td style="text-align:center">${wn}</td>
+                  <td style="text-align:right">
+                    <span style="font-weight:700;font-size:15px">${u.points}</span>
+                    <button title="Ver detalle de puntos" onclick="app.showPointsBreakdown(${uid},'${u.display_name.replace(/'/g, "\\'")}')" style="margin-left:6px;font-size:11px;padding:2px 7px;border:1px solid var(--color-border);border-radius:6px;background:transparent;color:var(--color-text-muted);cursor:pointer;vertical-align:middle">Ver</button>
+                  </td>
                 </tr>`;
               }).join('')}
             </tbody>
-          </table>`;
+          </table>
+          </div>
+          <div style="font-size:10px;color:var(--color-text-muted);margin-top:6px;padding:0 4px">
+            🎯 Exacto = 5 pts · 📏 G+Dif = 3 pts · ✅ Ganador = 2 pts
+          </div>`;
       };
 
       main.innerHTML = `
         <h2>Ranking</h2>
+        ${renderDailyTop(dailyTop)}
         <div style="display:flex;gap:4px;margin-bottom:1rem;flex-wrap:wrap">
           <button class="fixture-tab active" id="rank-tab-groups" onclick="app.switchRankTab('groups')">⚽ Fase de Grupos</button>
           <button class="fixture-tab" id="rank-tab-knockout" onclick="app.switchRankTab('knockout')">🏆 Eliminatorias</button>
@@ -1740,7 +2812,12 @@ const app = {
   async renderAdminPollasConfig() {
     const container = document.getElementById('admin-pollas-config');
     try {
-      const s = await this.api('/settings');
+      const [s, ls] = await Promise.all([
+        this.api('/settings'),
+        this.api('/predictions/lock-status')
+      ]);
+      const p1Locked = ls.polla1Locked;
+      const p2Locked = ls.polla2Locked;
       container.innerHTML = `
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
           <div>
@@ -1796,6 +2873,29 @@ const app = {
         </div>
         <button class="btn-primary" style="width:auto;margin-top:12px" onclick="app.savePollaSettings()">Guardar configuración</button>
         <div class="success-msg" id="pollas-config-msg" style="margin-top:8px"></div>
+        <div style="margin-top:16px;padding:12px;background:var(--color-background-secondary);border-radius:var(--radius-md);border:1px solid var(--color-border)">
+          <div style="font-size:12px;font-weight:700;color:var(--color-primary);margin-bottom:10px">🔒 Control manual de bloqueo</div>
+          <div style="display:grid;gap:8px">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+              <span style="font-size:12px">⚽ Pronóstico 1 (Grupos) — Estado: <strong id="lock1-status">${p1Locked ? '🔒 Bloqueado' : '🟢 Abierto'}</strong></span>
+              <div style="display:flex;gap:6px">
+                <button class="btn-sm" style="background:#166534;color:#fff;border:none;border-radius:4px;padding:4px 10px;cursor:pointer;font-size:11px" onclick="app.setPollaLock('polla1','unlock')">🔓 Abrir</button>
+                <button class="btn-sm" style="background:#991b1b;color:#fff;border:none;border-radius:4px;padding:4px 10px;cursor:pointer;font-size:11px" onclick="app.setPollaLock('polla1','lock')">🔒 Cerrar</button>
+                <button class="btn-sm" style="background:transparent;color:var(--color-text-muted);border:1px solid var(--color-border);border-radius:4px;padding:4px 10px;cursor:pointer;font-size:11px" onclick="app.setPollaLock('polla1','auto')">⏱ Auto</button>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+              <span style="font-size:12px">🏆 Pronóstico 2 (Eliminatorias) — Estado: <strong id="lock2-status">${p2Locked ? '🔒 Bloqueado' : '🟢 Abierto'}</strong></span>
+              <div style="display:flex;gap:6px">
+                <button class="btn-sm" style="background:#166534;color:#fff;border:none;border-radius:4px;padding:4px 10px;cursor:pointer;font-size:11px" onclick="app.setPollaLock('polla2','unlock')">🔓 Abrir</button>
+                <button class="btn-sm" style="background:#991b1b;color:#fff;border:none;border-radius:4px;padding:4px 10px;cursor:pointer;font-size:11px" onclick="app.setPollaLock('polla2','lock')">🔒 Cerrar</button>
+                <button class="btn-sm" style="background:transparent;color:var(--color-text-muted);border:1px solid var(--color-border);border-radius:4px;padding:4px 10px;cursor:pointer;font-size:11px" onclick="app.setPollaLock('polla2','auto')">⏱ Auto</button>
+              </div>
+            </div>
+          </div>
+          <div style="font-size:10px;color:var(--color-text-muted);margin-top:8px">⏱ Auto = vuelve al bloqueo automático (5 min antes del partido)</div>
+          <div class="success-msg" id="lock-msg" style="margin-top:6px"></div>
+        </div>
       `;
     } catch (e) { container.innerHTML = `<div style="color:var(--color-danger)">Error: ${e.message}</div>`; }
   },
@@ -1821,6 +2921,27 @@ const app = {
       msg.textContent = '✓ Configuración guardada.';
       setTimeout(() => msg.textContent = '', 3000);
     } catch (e) { msg.textContent = e.message; msg.style.color = 'var(--color-danger)'; }
+  },
+
+  async setPollaLock(polla, action) {
+    const msg = document.getElementById('lock-msg');
+    try {
+      const result = await this.api(`/admin/pollas/${polla}/lock`, {
+        method: 'PUT',
+        body: JSON.stringify({ action })
+      });
+      const labels = { lock: '🔒 Cerrado manualmente', unlock: '🟢 Abierto manualmente', auto: '⏱ Automático' };
+      if (polla === 'polla1') {
+        const el = document.getElementById('lock1-status');
+        if (el) el.textContent = action === 'auto' ? (result.locked ? '🔒 Bloqueado (auto)' : '🟢 Abierto (auto)') : labels[action];
+      } else {
+        const el = document.getElementById('lock2-status');
+        if (el) el.textContent = action === 'auto' ? (result.polla2Locked ? '🔒 Bloqueado (auto)' : '🟢 Abierto (auto)') : labels[action];
+      }
+      msg.style.color = 'var(--color-success)';
+      msg.textContent = `✓ Polla ${polla === 'polla1' ? '1' : '2'} ${action === 'lock' ? 'cerrada' : action === 'unlock' ? 'abierta' : 'en modo automático'}.`;
+      setTimeout(() => msg.textContent = '', 3000);
+    } catch(e) { msg.style.color = 'var(--color-danger)'; msg.textContent = e.message; }
   },
 
   async renderAdminPollasRegs() {
@@ -1982,7 +3103,11 @@ const app = {
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
         <div style="font-size:13px;color:var(--color-text-muted)">Los resultados se guardan y propagan automáticamente al siguiente partido.</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
-          ${groupsComplete && !bracketGenerated ? `<button class="btn-primary" style="width:auto;background:linear-gradient(135deg,#1a5c8a,#0f3d6b)" onclick="app.openBracketGenerator()">🔄 Generar Eliminatorias</button>` : ''}
+          ${!bracketGenerated
+            ? `<button class="btn-primary" style="width:auto;background:linear-gradient(135deg,#1a5c8a,#0f3d6b)" onclick="app.openBracketGenerator()">🔄 Generar Eliminatorias</button>`
+            : `<button class="btn-sm" style="background:transparent;border:1px solid var(--color-border);color:var(--color-text-muted);border-radius:6px;padding:6px 12px;cursor:pointer;font-size:12px" onclick="app.openBracketGenerator()">🔄 Regenerar bracket</button>`
+          }
+          <button class="btn-sm" style="background:transparent;border:1px solid var(--color-border);color:var(--color-text-muted);border-radius:6px;padding:6px 12px;cursor:pointer;font-size:12px" onclick="app.repropagate()" title="Avanza los ganadores reales a la siguiente ronda">⚡ Propagar ganadores</button>
           <button class="btn-primary" style="width:auto" onclick="app.saveAllAdminMatches()">💾 Guardar todo</button>
         </div>
       </div>
@@ -2096,7 +3221,15 @@ const app = {
 
   async openBracketGenerator() {
     const statusDiv = document.getElementById('admin-matches-msg');
-    if (!confirm('Se generarán automáticamente las eliminatorias según el reglamento FIFA (8 mejores terceros). ¿Continuar?')) return;
+    const groupsComplete = this.matches.filter(m => m.phase === 'groups').every(m => m.home_score != null);
+    const played = this.matches.filter(m => m.phase === 'groups' && m.home_score != null).length;
+    const total = this.matches.filter(m => m.phase === 'groups').length;
+
+    const msg = groupsComplete
+      ? '¿Generar eliminatorias con los 72 resultados completos?'
+      : `Faltan ${total - played} de ${total} partidos de grupos. ¿Generar el bracket con los resultados actuales? (puedes regenerarlo después)`;
+
+    if (!confirm(msg)) return;
 
     if (statusDiv) { statusDiv.textContent = 'Generando bracket...'; statusDiv.style.color = 'var(--color-text-muted)'; }
 
@@ -2105,7 +3238,6 @@ const app = {
       await this.loadData();
       this.renderAdminMatches();
 
-      // Mostrar resumen de clasificados
       const qualified = result.qualifiedThirds.map(t => {
         const team = this.teams.find(tm => tm.code === t.code);
         return `${team?.flag||''} ${team?.name||t.code} (${t.group})`;
@@ -2117,10 +3249,11 @@ const app = {
 
       if (statusDiv) {
         statusDiv.innerHTML = `
-          <div style="color:var(--color-success);margin-bottom:8px">✓ Bracket generado correctamente</div>
+          <div style="color:var(--color-success);margin-bottom:8px">✓ Bracket generado — ${played}/${total} partidos de grupos cargados</div>
           <div style="font-size:12px;color:var(--color-text-muted)">
             <strong>8 mejores terceros (clasificados):</strong> ${qualified}<br>
-            <strong>Terceros eliminados:</strong> ${eliminated || 'ninguno'}
+            ${eliminated ? `<strong>Terceros eliminados:</strong> ${eliminated}` : ''}
+            ${!groupsComplete ? '<br><span style="color:#fbbf24">⚠️ Recuerda regenerar el bracket cuando cargues los resultados restantes.</span>' : ''}
           </div>`;
       }
     } catch (e) {
