@@ -1005,6 +1005,66 @@ app.put('/api/admin/pollas/:polla/lock', authMiddleware, adminMiddleware, (req, 
   res.json({ success: true, polla, action, locked: arePolla1Locked(), polla2Locked: arePolla2Locked() });
 });
 
+// ─── COMPENSACIÓN DE PARTIDOS ─────────────────────────────────────────────────
+// Marca un partido como "compensado": todos los inscritos reciben 5 pts fijos por él.
+
+// Listar partidos compensados
+app.get('/api/admin/compensated', authMiddleware, adminMiddleware, (req, res) => {
+  const row = db.prepare("SELECT value FROM settings WHERE key = 'compensated_matches'").get();
+  const ids = row && row.value ? row.value.split(',').map(s => s.trim()).filter(Boolean) : [];
+  res.json({ compensated: ids });
+});
+
+// Agregar o quitar un partido de la lista de compensados
+app.put('/api/admin/compensated/:matchId', authMiddleware, adminMiddleware, (req, res) => {
+  const { matchId } = req.params;
+  const { action } = req.body || {}; // 'add' | 'remove'
+  if (!['add','remove'].includes(action)) return res.status(400).json({ error: 'Acción inválida' });
+
+  const match = db.prepare('SELECT id FROM matches WHERE id = ?').get(matchId);
+  if (!match) return res.status(404).json({ error: 'Partido no encontrado' });
+
+  const row = db.prepare("SELECT value FROM settings WHERE key = 'compensated_matches'").get();
+  let ids = row && row.value ? row.value.split(',').map(s => s.trim()).filter(Boolean) : [];
+
+  if (action === 'add' && !ids.includes(matchId)) ids.push(matchId);
+  if (action === 'remove') ids = ids.filter(id => id !== matchId);
+
+  db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('compensated_matches', ids.join(','));
+  res.json({ success: true, compensated: ids });
+});
+
+// ─── ESTADO DE BRACKET POR USUARIO (admin) ────────────────────────────────────
+// Indica qué usuarios completaron todo el bracket de eliminatorias.
+app.get('/api/admin/bracket-completion', authMiddleware, adminMiddleware, (req, res) => {
+  const users = db.prepare('SELECT id, display_name FROM users WHERE is_admin = 0').all();
+
+  // Total de partidos KO que requieren predicción (todos menos el 3er puesto opcional, pero lo incluimos)
+  const koMatches = db.prepare("SELECT id FROM matches WHERE phase != 'groups'").all();
+  const totalKO = koMatches.length;
+
+  const result = users.map(u => {
+    // Cuenta cuántos partidos KO tiene pronosticados (con marcador o ganador)
+    const filled = db.prepare(`
+      SELECT COUNT(DISTINCT p.match_id) as c
+      FROM predictions p
+      JOIN matches m ON m.id = p.match_id
+      WHERE p.user_id = ? AND m.phase != 'groups'
+        AND (p.pred_home IS NOT NULL OR p.pred_winner IS NOT NULL)
+    `).get(u.id).c;
+
+    return {
+      user_id: u.id,
+      display_name: u.display_name,
+      filled,
+      total: totalKO,
+      complete: filled >= totalKO
+    };
+  }).sort((a, b) => a.complete - b.complete || b.filled - a.filled); // incompletos primero
+
+  res.json({ users: result, totalKO });
+});
+
 // ─── APUESTAS DIARIAS ─────────────────────────────────────────────────────────
 
 app.get('/api/daily-bets/today', authMiddleware, (req, res) => {
