@@ -828,7 +828,7 @@ const app = {
       const matchesById = {};
       this.matches.forEach(m => { matchesById[m.id] = m; });
 
-      const QF_PAIRS  = { 'QF-1': ['R32-2','R32-6'], 'QF-2': ['R32-1','R32-3'], 'QF-3': ['R32-4','R32-5'], 'QF-4': ['R32-7','R32-8'], 'QF-5': ['R32-11','R32-12'], 'QF-6': ['R32-9','R32-10'], 'QF-7': ['R32-15','R32-14'], 'QF-8': ['R32-13','R32-16'] };
+      const QF_PAIRS  = { 'QF-1': ['R32-1','R32-2'], 'QF-2': ['R32-3','R32-4'], 'QF-3': ['R32-5','R32-6'], 'QF-4': ['R32-7','R32-8'], 'QF-5': ['R32-9','R32-10'], 'QF-6': ['R32-11','R32-12'], 'QF-7': ['R32-13','R32-14'], 'QF-8': ['R32-15','R32-16'] };
       const SF_PAIRS  = { 'SF-1': ['QF-1','QF-2'], 'SF-2': ['QF-3','QF-4'], 'SF-3': ['QF-5','QF-6'], 'SF-4': ['QF-7','QF-8'], 'SF-5': ['SF-1','SF-2'], 'SF-6': ['SF-3','SF-4'] };
       const FINAL_PAIR = ['SF-5','SF-6'];
 
@@ -1332,7 +1332,7 @@ const app = {
       // ── Bracket: equipos reales + cascada con los pronósticos de ESTE usuario ──
       const matchesById = {};
       this.matches.forEach(m => { matchesById[m.id] = m; });
-      const QF = {'QF-1':['R32-2','R32-6'],'QF-2':['R32-1','R32-3'],'QF-3':['R32-4','R32-5'],'QF-4':['R32-7','R32-8'],'QF-5':['R32-11','R32-12'],'QF-6':['R32-9','R32-10'],'QF-7':['R32-15','R32-14'],'QF-8':['R32-13','R32-16']};
+      const QF = {'QF-1':['R32-1','R32-2'],'QF-2':['R32-3','R32-4'],'QF-3':['R32-5','R32-6'],'QF-4':['R32-7','R32-8'],'QF-5':['R32-9','R32-10'],'QF-6':['R32-11','R32-12'],'QF-7':['R32-13','R32-14'],'QF-8':['R32-15','R32-16']};
       const SF = {'SF-1':['QF-1','QF-2'],'SF-2':['QF-3','QF-4'],'SF-3':['QF-5','QF-6'],'SF-4':['QF-7','QF-8'],'SF-5':['SF-1','SF-2'],'SF-6':['SF-3','SF-4']};
       const memo = {};
       const winOf = (id, h, a) => {
@@ -1671,7 +1671,7 @@ const app = {
   // ── ELIMINATORIAS ───────────────────────────────────────────────────────────
 
   koFeederLabel(matchId) {
-    const QF_PAIRS = { 'QF-1': ['R32-2','R32-6'], 'QF-2': ['R32-1','R32-3'], 'QF-3': ['R32-4','R32-5'], 'QF-4': ['R32-7','R32-8'], 'QF-5': ['R32-11','R32-12'], 'QF-6': ['R32-9','R32-10'], 'QF-7': ['R32-15','R32-14'], 'QF-8': ['R32-13','R32-16'] };
+    const QF_PAIRS = { 'QF-1': ['R32-1','R32-2'], 'QF-2': ['R32-3','R32-4'], 'QF-3': ['R32-5','R32-6'], 'QF-4': ['R32-7','R32-8'], 'QF-5': ['R32-9','R32-10'], 'QF-6': ['R32-11','R32-12'], 'QF-7': ['R32-13','R32-14'], 'QF-8': ['R32-15','R32-16'] };
     const SF_PAIRS = { 'SF-1': ['QF-1','QF-2'], 'SF-2': ['QF-3','QF-4'], 'SF-3': ['QF-5','QF-6'], 'SF-4': ['QF-7','QF-8'], 'SF-5': ['SF-1','SF-2'], 'SF-6': ['SF-3','SF-4'] };
     const pretty = (id) => {
       if (id.startsWith('R32')) return 'Dieciseisavos ' + id.replace('R32-','');
@@ -1698,7 +1698,7 @@ const app = {
     const matchesById = {};
     this.matches.forEach(m => { matchesById[m.id] = m; });
 
-    const QF_PAIRS  = { 'QF-1': ['R32-2','R32-6'], 'QF-2': ['R32-1','R32-3'], 'QF-3': ['R32-4','R32-5'], 'QF-4': ['R32-7','R32-8'], 'QF-5': ['R32-11','R32-12'], 'QF-6': ['R32-9','R32-10'], 'QF-7': ['R32-15','R32-14'], 'QF-8': ['R32-13','R32-16'] };
+    const QF_PAIRS  = { 'QF-1': ['R32-1','R32-2'], 'QF-2': ['R32-3','R32-4'], 'QF-3': ['R32-5','R32-6'], 'QF-4': ['R32-7','R32-8'], 'QF-5': ['R32-9','R32-10'], 'QF-6': ['R32-11','R32-12'], 'QF-7': ['R32-13','R32-14'], 'QF-8': ['R32-15','R32-16'] };
     const SF_PAIRS  = { 'SF-1': ['QF-1','QF-2'], 'SF-2': ['QF-3','QF-4'], 'SF-3': ['QF-5','QF-6'], 'SF-4': ['QF-7','QF-8'], 'SF-5': ['SF-1','SF-2'], 'SF-6': ['SF-3','SF-4'] };
     const FINAL_PAIR = ['SF-5','SF-6'];
 
@@ -3112,6 +3112,22 @@ const app = {
         </div>
       </div>
       <div class="success-msg" id="admin-matches-msg" style="margin-bottom:8px"></div>
+      <div style="margin-bottom:14px;padding:12px;background:var(--color-surface);border:1px solid rgba(251,191,36,0.25);border-radius:10px">
+        <div style="font-size:13px;font-weight:700;color:#fbbf24;margin-bottom:6px">🎁 Compensar un partido</div>
+        <div style="font-size:11px;color:var(--color-text-muted);margin-bottom:8px">Otorga 5 puntos fijos a TODOS los inscritos en ese partido, sin importar su predicción. Útil si hubo un problema técnico.</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+          <select id="compensate-select" style="flex:1;min-width:180px;padding:6px 10px;border:1px solid var(--color-border);border-radius:6px;background:var(--color-background-secondary);color:var(--color-text);font-size:12px">
+            <option value="">Selecciona un partido...</option>
+            ${this.matches.filter(m => m.phase !== 'groups').map(m => {
+              const home = m.home_team ? this.teamByCode(m.home_team)?.name : '?';
+              const away = m.away_team ? this.teamByCode(m.away_team)?.name : '?';
+              return `<option value="${m.id}">${m.id} — ${home} vs ${away}</option>`;
+            }).join('')}
+          </select>
+          <button class="btn-sm" style="background:#fbbf24;color:#1a1200;border:none;border-radius:6px;padding:6px 12px;cursor:pointer;font-weight:600;font-size:12px" onclick="app.compensateMatch('add')">Compensar</button>
+        </div>
+        <div id="compensated-list" style="margin-top:8px;font-size:11px"></div>
+      </div>
       ${phases.map(p => {
         let matches;
         if (p.ids) {
@@ -3217,6 +3233,9 @@ const app = {
         }
       });
     });
+
+    // Cargar la lista de partidos compensados
+    this.loadCompensatedList();
   },
 
   async openBracketGenerator() {
@@ -3275,6 +3294,44 @@ const app = {
       }
     } catch (e) {
       if (msg) { msg.textContent = 'Error: ' + e.message; msg.style.color = 'var(--color-danger)'; }
+    }
+  },
+
+  async compensateMatch(action, matchId) {
+    const msg = document.getElementById('admin-matches-msg');
+    const id = matchId || document.getElementById('compensate-select')?.value;
+    if (!id) { if (msg) { msg.textContent = 'Selecciona un partido primero.'; msg.style.color = 'var(--color-danger)'; } return; }
+    try {
+      await this.api(`/admin/compensated/${id}`, { method: 'PUT', body: JSON.stringify({ action }) });
+      await this.loadCompensatedList();
+      if (msg) {
+        msg.textContent = action === 'add'
+          ? `✓ Partido ${id} compensado — todos los inscritos reciben 5 pts.`
+          : `✓ Compensación de ${id} retirada.`;
+        msg.style.color = 'var(--color-success)';
+        setTimeout(() => msg.textContent = '', 3000);
+      }
+    } catch (e) {
+      if (msg) { msg.textContent = 'Error: ' + e.message; msg.style.color = 'var(--color-danger)'; }
+    }
+  },
+
+  async loadCompensatedList() {
+    const div = document.getElementById('compensated-list');
+    if (!div) return;
+    try {
+      const { compensated } = await this.api('/admin/compensated');
+      if (!compensated.length) {
+        div.innerHTML = '<span style="color:var(--color-text-muted)">No hay partidos compensados.</span>';
+        return;
+      }
+      div.innerHTML = '<strong style="color:var(--color-text-muted)">Compensados:</strong> ' + compensated.map(id => {
+        const m = this.matches.find(mm => mm.id === id);
+        const label = m ? `${id}` : id;
+        return `<span style="display:inline-flex;align-items:center;gap:4px;background:rgba(251,191,36,0.12);border:1px solid rgba(251,191,36,0.3);border-radius:10px;padding:1px 8px;margin:2px">${label} <button onclick="app.compensateMatch('remove','${id}')" style="background:none;border:none;color:#fbbf24;cursor:pointer;font-size:13px;padding:0;line-height:1" title="Quitar compensación">✕</button></span>`;
+      }).join('');
+    } catch (e) {
+      div.innerHTML = `<span style="color:var(--color-danger)">Error: ${e.message}</span>`;
     }
   },
 
@@ -3405,8 +3462,22 @@ const app = {
   async renderAdminUsers() {
     const container = document.getElementById('admin-users');
     try {
-      const users = await this.api('/admin/users');
-      container.innerHTML = users.map(u => `
+      const [users, bracketData] = await Promise.all([
+        this.api('/admin/users'),
+        this.api('/admin/bracket-completion').catch(() => ({ users: [], totalKO: 0 }))
+      ]);
+      // Mapa de completitud por usuario
+      const bracketBy = {};
+      (bracketData.users || []).forEach(b => { bracketBy[b.user_id] = b; });
+
+      container.innerHTML = users.map(u => {
+        const bracket = bracketBy[u.id];
+        const bracketChip = bracket
+          ? (bracket.complete
+              ? '<span class="chip" style="background:rgba(74,222,128,0.15);color:#4ade80">✅ Bracket completo</span>'
+              : `<span class="chip" style="background:rgba(251,191,36,0.15);color:#fbbf24">⚠️ Bracket incompleto (${bracket.filled}/${bracket.total})</span>`)
+          : '';
+        return `
         <div class="user-row" data-user="${u.id}" style="align-items:flex-start">
           <div class="user-row-info">
             <input type="text" data-field="display_name" value="${u.display_name}" style="font-weight:500;margin-bottom:4px">
@@ -3420,6 +3491,7 @@ const app = {
               <span class="chip ${u.paid_knockout ? 'paid' : 'unpaid'}">
                 Finales: ${u.paid_knockout ? '✓ Pagado' : 'Pendiente'}
               </span>
+              ${u.is_admin ? '' : bracketChip}
             </div>
           </div>
           <div style="display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end">
@@ -3434,7 +3506,7 @@ const app = {
             ${u.id !== this.user.id ? '<button class="btn-sm btn-danger" data-action="delete">Eliminar</button>' : ''}
           </div>
         </div>
-      `).join('');
+      `;}).join('');
       container.querySelectorAll('[data-user]').forEach(row => {
         row.querySelectorAll('[data-action]').forEach(btn => {
           btn.addEventListener('click', () => this.handleAdminUserAction(row, btn.dataset.action, users));
