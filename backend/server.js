@@ -1008,6 +1008,13 @@ app.put('/api/admin/pollas/:polla/lock', authMiddleware, adminMiddleware, (req, 
 // ─── COMPENSACIÓN DE PARTIDOS ─────────────────────────────────────────────────
 // Marca un partido como "compensado": todos los inscritos reciben 5 pts fijos por él.
 
+// Listar partidos compensados (versión pública: cualquier usuario autenticado)
+app.get('/api/compensated-public', authMiddleware, (req, res) => {
+  const row = db.prepare("SELECT value FROM settings WHERE key = 'compensated_matches'").get();
+  const ids = row && row.value ? row.value.split(',').map(s => s.trim()).filter(Boolean) : [];
+  res.json({ compensated: ids });
+});
+
 // Listar partidos compensados
 app.get('/api/admin/compensated', authMiddleware, adminMiddleware, (req, res) => {
   const row = db.prepare("SELECT value FROM settings WHERE key = 'compensated_matches'").get();
