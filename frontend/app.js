@@ -1698,11 +1698,28 @@ const app = {
     const matchesById = {};
     this.matches.forEach(m => { matchesById[m.id] = m; });
 
+    // Partidos compensados: el ganador REAL avanza obligatoriamente en el bracket
+    // de todos (además de otorgar 5 pts). Se cargan una vez y se cachean.
+    let compensatedSet = this._compensatedSet || new Set();
+    try {
+      const resp = await this.api('/compensated-public').catch(() => null);
+      if (resp && resp.compensated) {
+        compensatedSet = new Set(resp.compensated);
+        this._compensatedSet = compensatedSet;
+      }
+    } catch (e) { /* usar cache si falla */ }
+
     const QF_PAIRS  = { 'QF-1': ['R32-3','R32-5'], 'QF-2': ['R32-1','R32-4'], 'QF-3': ['R32-2','R32-6'], 'QF-4': ['R32-7','R32-8'], 'QF-5': ['R32-11','R32-12'], 'QF-6': ['R32-9','R32-10'], 'QF-7': ['R32-14','R32-16'], 'QF-8': ['R32-13','R32-15'] };
     const SF_PAIRS  = { 'SF-1': ['QF-1','QF-2'], 'SF-2': ['QF-5','QF-6'], 'SF-3': ['QF-3','QF-4'], 'SF-4': ['QF-7','QF-8'], 'SF-5': ['SF-1','SF-2'], 'SF-6': ['SF-3','SF-4'] };
     const FINAL_PAIR = ['SF-5','SF-6'];
 
     const koWinnerOf = (matchId, homeCode, awayCode) => {
+      // Partido compensado con resultado real cargado: el ganador real avanza
+      // obligatoriamente, sin importar lo que el usuario haya predicho.
+      if (compensatedSet.has(matchId)) {
+        const real = matchesById[matchId];
+        if (real && real.winner) return real.winner;
+      }
       const pred = this.predictions[matchId];
       if (!pred) return null;
       const ph = pred.pred_home != null ? parseInt(pred.pred_home) : null;
@@ -3303,6 +3320,7 @@ const app = {
     if (!id) { if (msg) { msg.textContent = 'Selecciona un partido primero.'; msg.style.color = 'var(--color-danger)'; } return; }
     try {
       await this.api(`/admin/compensated/${id}`, { method: 'PUT', body: JSON.stringify({ action }) });
+      this._compensatedSet = null; // invalidar cache para que se recargue en el bracket
       await this.loadCompensatedList();
       if (msg) {
         msg.textContent = action === 'add'
