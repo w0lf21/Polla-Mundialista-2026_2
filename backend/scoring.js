@@ -121,6 +121,14 @@ function calcUserTotalPoints(db, userId) {
     WHERE m.home_score IS NOT NULL AND m.away_score IS NOT NULL
   `).all(userId);
 
+  // Partidos compensados: todos los inscritos reciben 5 pts fijos por ese partido.
+  // Se guardan como CSV en settings -> 'compensated_matches' (ej: "R32-1,R32-2")
+  let compensated = new Set();
+  try {
+    const row = db.prepare("SELECT value FROM settings WHERE key = 'compensated_matches'").get();
+    if (row && row.value) compensated = new Set(row.value.split(',').map(s => s.trim()).filter(Boolean));
+  } catch (e) { /* tabla settings sin la clave aún */ }
+
   let total = 0;
   let correctPredictions = 0;
   let exactScores = 0;   // count
@@ -129,8 +137,16 @@ function calcUserTotalPoints(db, userId) {
   let diffPts = 0;
   let winnerCount = 0;    // solo ganador correcto
   let winnerPts = 0;
+  let compensatedPts = 0; // puntos otorgados por compensación
 
   for (const m of matches) {
+    // Compensación: 5 pts fijos sin importar predicción (ni siquiera requiere haber pronosticado)
+    if (compensated.has(m.id)) {
+      total += 5;
+      compensatedPts += 5;
+      continue;
+    }
+
     if (m.pred_home == null && m.pred_winner == null) continue;
 
     let pts = 0;
@@ -163,6 +179,7 @@ function calcUserTotalPoints(db, userId) {
 
   return {
     total,
+    compensatedPts,
     correctPredictions,
     exactScores,
     exactPts,
