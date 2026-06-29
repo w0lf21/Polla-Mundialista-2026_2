@@ -1090,12 +1090,13 @@ const app = {
       const data = await this.api(`/users/${rivalId}/compare?phase=${phase||'knockout'}`);
       const { me, rival, gap, canCatchUp, gold, silver, neutral, totalPending } = data;
 
+      const faseLabel = (data.phase === 'knockout') ? 'eliminatorias' : 'grupos';
       const alertClass = gap <= 0 ? 'good' : canCatchUp ? 'warn' : 'bad';
       const alertMsg = gap <= 0
-        ? `🎉 Ya le vas ganando por ${Math.abs(gap)} pts.`
+        ? `🎉 Ya le vas ganando en ${faseLabel} por ${Math.abs(gap)} pts.`
         : canCatchUp
-        ? `⚠️ Te lleva ${gap} pts. Puedes alcanzarlo si salen tus exactos — máxima ganancia neta posible: ${gold.length * 5 + silver.reduce((s,m) => s+m.net_gain,0)} pts.`
-        : `❌ Te lleva ${gap} pts y matemáticamente es difícil alcanzarlo solo con grupos.`;
+        ? `⚠️ Te lleva ${gap} pts en ${faseLabel}. Puedes alcanzarlo — máxima ganancia neta posible: ${gold.length * 5 + silver.reduce((s,m) => s+m.net_gain,0)} pts.`
+        : `❌ Te lleva ${gap} pts en ${faseLabel}. Difícil alcanzarlo con los partidos pendientes.`;
 
       const renderTable = (matches, emptyMsg) => {
         if (!matches.length) return `<div style="font-size:12px;color:var(--color-text-muted);padding:6px 0">${emptyMsg}</div>`;
@@ -1115,13 +1116,13 @@ const app = {
           <div class="cmp-score-box me">
             <div style="font-size:11px;color:var(--color-text-muted)">Tú</div>
             <div style="font-size:22px;font-weight:700;color:var(--color-primary)">${me.points}</div>
-            <div style="font-size:10px;color:var(--color-text-muted)">pts actuales</div>
+            <div style="font-size:10px;color:var(--color-text-muted)">pts en ${faseLabel}</div>
           </div>
           <div style="display:flex;align-items:center;font-size:20px;color:var(--color-text-muted)">⚔️</div>
           <div class="cmp-score-box">
             <div style="font-size:11px;color:var(--color-text-muted)">${rival.display_name.split(' ')[0]}</div>
             <div style="font-size:22px;font-weight:700">${rival.points}</div>
-            <div style="font-size:10px;color:var(--color-text-muted)">pts actuales</div>
+            <div style="font-size:10px;color:var(--color-text-muted)">pts en ${faseLabel}</div>
           </div>
         </div>
         <div class="cmp-alert ${alertClass}">${alertMsg}</div>
@@ -1132,7 +1133,7 @@ const app = {
         <div class="cmp-section-title" style="color:var(--color-text-muted)">🤝 Pronóstico idéntico — No mueve la brecha (${neutral.length})</div>
         ${renderTable(neutral, 'Sin pronósticos idénticos.')}
         <div style="font-size:11px;color:var(--color-text-muted);margin-top:10px;padding-top:8px;border-top:1px solid var(--color-border)">
-          Análisis basado en ${totalPending} partidos pendientes de fase de grupos. Los puntos de eliminatorias no están incluidos.
+          Análisis basado en ${totalPending} partidos pendientes de ${faseLabel}.
         </div>`;
     } catch(e) {
       container.innerHTML = `<div style="color:var(--color-danger);padding:1rem">⚠️ ${e.message}</div>`;
