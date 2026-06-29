@@ -660,7 +660,7 @@ app.get('/api/leaderboard/knockout', (req, res) => {
 
   const leaderboard = regs.map(u => {
     const matches = db.prepare(`
-      SELECT m.*, p.pred_home, p.pred_away, p.pred_winner, p.pred_pen_home, p.pred_pen_away
+      SELECT m.*, p.pred_home, p.pred_away, p.pred_winner, p.pred_pen_home, p.pred_pen_away, p.updated_at
       FROM matches m
       LEFT JOIN predictions p ON p.match_id = m.id AND p.user_id = ?
       WHERE m.phase != 'groups' AND m.home_score IS NOT NULL
@@ -668,11 +668,17 @@ app.get('/api/leaderboard/knockout', (req, res) => {
 
     let total = 0, correct = 0, exact = 0, exactPts = 0, diffCount = 0, diffPts = 0, winnerCount = 0, winnerPts = 0;
     for (const m of matches) {
-      // Compensación excepcional: exacto = 8 pts, los demás = 5 pts
+      // Compensación: exacto=8 solo si predijo ANTES del inicio del partido
       if (compensatedSet.has(m.id)) {
         const acertoExacto = m.pred_home != null && m.pred_away != null &&
           parseInt(m.pred_home) === m.home_score && parseInt(m.pred_away) === m.away_score;
-        if (acertoExacto) { total += 8; exact++; exactPts += 8; }
+        let predAntes = true;
+        if (acertoExacto && m.match_date && m.match_time && m.updated_at) {
+          const matchStart = new Date(m.match_date + 'T' + m.match_time + ':00-05:00').getTime();
+          const predTime = new Date(m.updated_at.replace(' ','T')+'Z').getTime();
+          predAntes = predTime <= matchStart;
+        }
+        if (acertoExacto && predAntes) { total += 8; exact++; exactPts += 8; }
         else { total += 5; exact++; exactPts += 5; }
         continue;
       }
