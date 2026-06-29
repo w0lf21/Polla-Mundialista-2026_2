@@ -1403,6 +1403,14 @@ const app = {
 
     const container = document.getElementById('user-pred-content');
     try {
+      // Para KO solo necesitamos las predicciones, no grupos ni podio
+      if (phase === 'knockout') {
+        const otherPredsArr = await this.api(`/predictions?userId=${userId}`);
+        const upreds = Object.fromEntries(otherPredsArr.map(p => [p.match_id, p]));
+        container.innerHTML = this._renderUserKOBracket(upreds);
+        return;
+      }
+
       const [classified, otherPredsArr, podiumData] = await Promise.all([
         this.api(`/predictions/classified?userId=${userId}`),
         this.api(`/predictions?userId=${userId}`),
@@ -1412,23 +1420,9 @@ const app = {
       // Mapa LOCAL — nunca tocamos this.predictions
       const upreds = Object.fromEntries(otherPredsArr.map(p => [p.match_id, p]));
 
+      // Fase de grupos
       const groupColors = { A:'#1a5c8a',B:'#6b21a8',C:'#166534',D:'#991b1b',E:'#0f766e',F:'#92400e',G:'#5b21b6',H:'#1e40af',I:'#9d174d',J:'#065f46',K:'#7c2d12',L:'#164e63' };
       const groupMatches = this.matches.filter(m => m.phase === 'groups');
-      const koMatches = this.matches.filter(m => m.phase !== 'groups');
-
-      // Si es fase de eliminatorias, mostrar solo el bracket KO
-      if (phase === 'knockout') {
-        const filledKO = koMatches.filter(m => upreds[m.id] && (upreds[m.id].pred_home != null || upreds[m.id].pred_winner != null)).length;
-        if (filledKO === 0) {
-          container.innerHTML = `<div style="text-align:center;padding:2rem;color:var(--color-text-muted)">📝 ${displayName} aún no tiene pronósticos de eliminatorias.</div>`;
-          return;
-        }
-        // Renderizar bracket KO del usuario
-        const bracketHtml = this._renderUserKOBracket(upreds, displayName);
-        container.innerHTML = bracketHtml;
-        return;
-      }
-
       const filledGroup = groupMatches.filter(m => upreds[m.id] && upreds[m.id].pred_home != null).length;
 
       if (filledGroup === 0) {
