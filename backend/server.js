@@ -458,12 +458,20 @@ app.post('/api/predictions', authMiddleware, (req, res) => {
     INSERT INTO predictions (user_id, match_id, pred_home, pred_away, pred_winner, pred_pen_home, pred_pen_away, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
     ON CONFLICT(user_id, match_id) DO UPDATE SET
-      pred_home = excluded.pred_home,
-      pred_away = excluded.pred_away,
-      pred_winner = excluded.pred_winner,
+      pred_home     = excluded.pred_home,
+      pred_away     = excluded.pred_away,
+      pred_winner   = excluded.pred_winner,
       pred_pen_home = excluded.pred_pen_home,
       pred_pen_away = excluded.pred_pen_away,
-      updated_at = datetime('now')
+      updated_at    = CASE
+        WHEN predictions.pred_home IS NOT excluded.pred_home
+          OR predictions.pred_away IS NOT excluded.pred_away
+          OR predictions.pred_winner IS NOT excluded.pred_winner
+          OR predictions.pred_pen_home IS NOT excluded.pred_pen_home
+          OR predictions.pred_pen_away IS NOT excluded.pred_pen_away
+        THEN datetime('now')
+        ELSE predictions.updated_at
+      END
   `).run(req.user.id, match_id,
     pred_home ?? null, pred_away ?? null,
     pred_winner ?? null,
@@ -1281,7 +1289,24 @@ app.get('/api/daily-bets/results/:matchId', authMiddleware, (req, res) => {
   });
 });
 
-// Admin — ver todas las apuestas del día con detalle y estado de pago
+// Admin — corregir timestamp de una predicción (para casos donde el updated_at se pisó injustamente)
+app.put('/api/admin/predictions/:userId/:matchId/fix-time', authMiddleware, adminMiddleware, (req, res) => {
+  const { userId, matchId } = req.params;
+  // Establece el updated_at a 1 hora antes del inicio del partido (garantiza que sea "antes")
+  const match = db.prepare('SELECT * FROM matches WHERE id = ?').get(matchId);
+  if (!match) return res.status(404).json({ error: 'Partido no existe' });
+  const pred = db.prepare('SELECT * FROM predictions WHERE user_id = ? AND match_id = ?').get(userId, matchId);
+  if (!pred) return res.status(404).json({ error: 'Predicción no existe' });
+  // Calcular 1 hora antes del partido en UTC
+  const matchStart = matchStartUTC(match.match_date, match.match_time);
+  const oneHourBefore = new Date(matchStart.getTime() - 60 * 60 * 1000);
+  const newTime = oneHourBefore.toISOString().replace('T', ' ').slice(0, 19);
+  db.prepare('UPDATE predictions SET updated_at = ? WHERE user_id = ? AND match_id = ?')
+    .run(newTime, userId, matchId);
+  res.json({ success: true, updated_at: newTime, message: `Timestamp de ${userId} en ${matchId} corregido a ${newTime} UTC (1h antes del partido)` });
+});
+
+// Admin — corregir timestamp de una predicción (para casos donde el updated_at se pisó injustamente)
 app.get('/api/admin/daily-bets/today', authMiddleware, adminMiddleware, (req, res) => {
   const now = new Date();
   const local = new Date(now.getTime() + (-5 * 60 - now.getTimezoneOffset()) * 60000);
