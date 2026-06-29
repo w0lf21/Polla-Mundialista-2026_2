@@ -359,6 +359,21 @@ const app = {
 
     // ── Tarjeta de partido para bracket: muestra cruce REAL + mi predicción de ganador
     const myPreds = this.predictions || {};
+
+    // Detectar la fase KO activa: la primera que tiene partidos sin resultado
+    // (con equipos ya definidos). "Mi pred" solo se muestra en esa fase.
+    const koPhaseOrder = ['r16', 'qf', 'sf', 'final', 'tp'];
+    const activeKOPhase = (() => {
+      for (const phase of koPhaseOrder) {
+        const hasUnplayed = this.matches.some(m =>
+          m.phase === phase && m.home_score == null && m.home_team
+        );
+        if (hasUnplayed) return phase;
+      }
+      // Todas jugadas → mostrar en la última con resultados
+      return 'final';
+    })();
+
     const matchCard = (m) => {
       if (!m) return `<div class="bk-match empty">?</div>`;
       const home = m.home_team ? this.teamByCode(m.home_team) : null;
@@ -367,26 +382,31 @@ const app = {
       const wc = m.winner;
       const bothDefined = m.home_team && m.away_team;
 
-      // Mi predicción para ESTE cruce real
-      const pred = myPreds[m.id];
-      let myPick = null; // código del equipo que predije como ganador
-      if (pred && bothDefined) {
-        const ph = pred.pred_home != null ? parseInt(pred.pred_home) : null;
-        const pa = pred.pred_away != null ? parseInt(pred.pred_away) : null;
-        if (ph != null && pa != null) {
-          if (ph > pa) myPick = m.home_team;
-          else if (pa > ph) myPick = m.away_team;
-          else myPick = pred.pred_winner || null; // empate → ganador por penales
-        } else if (pred.pred_winner) {
-          myPick = pred.pred_winner;
-        }
-      }
-      const myScore = (pred && pred.pred_home != null) ? `${pred.pred_home}-${pred.pred_away}` : null;
+      // "Mi pred" solo visible en la fase activa actual
+      const isActivePhase = m.phase === activeKOPhase;
 
-      // Marca de acierto si ya hay resultado
-      let pickResult = ''; // 'hit' | 'miss' | ''
-      if (hasResult && myPick && wc) {
-        pickResult = myPick === wc ? 'hit' : 'miss';
+      // Mi predicción — solo para la fase activa actual
+      let myPick = null;
+      let myScore = null;
+      let pickResult = '';
+
+      if (isActivePhase) {
+        const pred = myPreds[m.id];
+        if (pred && bothDefined) {
+          const ph = pred.pred_home != null ? parseInt(pred.pred_home) : null;
+          const pa = pred.pred_away != null ? parseInt(pred.pred_away) : null;
+          if (ph != null && pa != null) {
+            if (ph > pa) myPick = m.home_team;
+            else if (pa > ph) myPick = m.away_team;
+            else myPick = pred.pred_winner || null;
+          } else if (pred.pred_winner) {
+            myPick = pred.pred_winner;
+          }
+          myScore = pred.pred_home != null ? `${pred.pred_home}-${pred.pred_away}` : null;
+        }
+        if (hasResult && myPick && wc) {
+          pickResult = myPick === wc ? 'hit' : 'miss';
+        }
       }
 
       const teamRow = (team, code, scoreVal, penVal, confirmed) => {
