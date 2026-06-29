@@ -230,9 +230,37 @@ const app = {
 
   async refreshPoints() {
     try {
-      const lb = await this.api('/leaderboard');
-      const me = lb.find(u => u.id === this.user.id);
-      document.getElementById('header-points').textContent = (me ? me.points : 0) + ' pts';
+      const [lb1, lb2] = await Promise.all([
+        this.api('/leaderboard/groups').catch(() => ({ leaderboard: [] })),
+        this.api('/leaderboard/knockout').catch(() => ({ leaderboard: [] }))
+      ]);
+      const me1 = lb1.leaderboard?.find(u => u.user_id === this.user.id);
+      const me2 = lb2.leaderboard?.find(u => u.user_id === this.user.id);
+      const pts1 = me1 ? me1.points : null;
+      const pts2 = me2 ? me2.points : null;
+
+      // Contador principal (Grupos)
+      const headerPts = document.getElementById('header-points');
+      if (headerPts) headerPts.textContent = (pts1 ?? 0) + ' pts';
+
+      // Contador secundario (Eliminatorias) — crearlo si no existe
+      let headerPts2 = document.getElementById('header-points-ko');
+      if (!headerPts2 && headerPts) {
+        headerPts2 = document.createElement('span');
+        headerPts2.id = 'header-points-ko';
+        headerPts2.style.cssText = 'display:inline-block;margin-left:6px;padding:4px 12px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:20px;font-size:13px;font-weight:700;cursor:pointer;color:var(--color-text)';
+        headerPts2.title = 'Tus puntos en Eliminatorias';
+        headerPts.insertAdjacentElement('afterend', headerPts2);
+      }
+      if (headerPts2 && pts2 != null) {
+        headerPts2.textContent = '🏆 ' + pts2 + ' pts';
+        headerPts2.style.display = 'inline-block';
+      } else if (headerPts2) {
+        headerPts2.style.display = 'none';
+      }
+
+      // Actualizar el botón principal con label de fase
+      if (headerPts) headerPts.title = 'Tus puntos en Fase de Grupos';
     } catch (e) {}
   },
 
@@ -511,14 +539,15 @@ const app = {
     }).join('');
 
     // ── Bracket pathway (afuera → adentro, con scroll horizontal en mobile)
-    // Pathway 1: R32-1..R32-8 → QF-1..QF-4 → SF-1,SF-2 → SF-5 → FINAL
-    // Pathway 2: R32-9..R32-16 → QF-5..QF-8 → SF-3,SF-4 → SF-6 → FINAL
-    const p1r32 = ['R32-1','R32-2','R32-3','R32-4','R32-5','R32-6','R32-7','R32-8'].map(id => matchById[id] || null);
+    // Pathway 1: orden visual alineado con PROPAGATION_MAP (FIFA oficial)
+    // QF-1 ← R32-3, R32-5 | QF-2 ← R32-1, R32-4 | QF-3 ← R32-2, R32-6 | QF-4 ← R32-7, R32-8
+    const p1r32 = ['R32-3','R32-5','R32-1','R32-4','R32-2','R32-6','R32-7','R32-8'].map(id => matchById[id] || null);
     const p1r16 = ['QF-1','QF-2','QF-3','QF-4'].map(id => matchById[id] || null);
     const p1qf  = ['SF-1','SF-2'].map(id => matchById[id] || null);
     const p1sf  = matchById['SF-5'] || null;
 
-    const p2r32 = ['R32-9','R32-10','R32-11','R32-12','R32-13','R32-14','R32-15','R32-16'].map(id => matchById[id] || null);
+    // Pathway 2: QF-5 ← R32-11, R32-12 | QF-6 ← R32-9, R32-10 | QF-7 ← R32-14, R32-16 | QF-8 ← R32-13, R32-15
+    const p2r32 = ['R32-11','R32-12','R32-9','R32-10','R32-14','R32-16','R32-13','R32-15'].map(id => matchById[id] || null);
     const p2r16 = ['QF-5','QF-6','QF-7','QF-8'].map(id => matchById[id] || null);
     const p2qf  = ['SF-3','SF-4'].map(id => matchById[id] || null);
     const p2sf  = matchById['SF-6'] || null;
@@ -2479,8 +2508,7 @@ const app = {
 
       const me2 = lb2.leaderboard?.find(u => u.user_id === this.user.id);
       const me1 = lb1.leaderboard?.find(u => u.user_id === this.user.id);
-      const pts = defaultTab === 'knockout' ? me2?.points : me1?.points;
-      if (pts != null) document.getElementById('header-points').textContent = pts + ' pts';
+      if (me1 != null || me2 != null) this.refreshPoints();
 
     } catch (e) { main.innerHTML = `<div class="empty-state">Error: ${e.message}</div>`; }
   },
