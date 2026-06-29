@@ -62,6 +62,18 @@ function calcKOMatchPoints(pred, real) {
     const ph = parseInt(pred.pred_home);
     const pa = parseInt(pred.pred_away);
 
+    // Si el pred_winner está definido y contradice al ganador real → 0 pts.
+    // Esto captura los casos de cascada errónea donde el usuario predijo
+    // que avanzaba el equipo equivocado (aunque el marcador numérico coincida).
+    // Solo aplicamos si pred_winner viene explícito Y contradice al real.
+    const predNumResult = ph > pa ? 'home' : ph < pa ? 'away' : 'draw';
+    const realNumResult = rh > ra ? 'home' : 'away';
+    if (pred.pred_winner && realWinner && pred.pred_winner !== realWinner) {
+      // Doble check: si el marcador numérico también coincide con el ganador real,
+      // pero el pred_winner es incorrecto, es cascada errónea → 0
+      return 0;
+    }
+
     if (ph === rh && pa === ra) return POINTS.KO_EXACT;
 
     const predResult = ph > pa ? 'H' : ph < pa ? 'A' : 'D';
