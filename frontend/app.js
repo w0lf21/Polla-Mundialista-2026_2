@@ -3656,11 +3656,21 @@ const app = {
         this.api('/admin/users'),
         this.api('/admin/bracket-completion').catch(() => ({ users: [], totalKO: 0 }))
       ]);
-      // Mapa de completitud por usuario
       const bracketBy = {};
       (bracketData.users || []).forEach(b => { bracketBy[b.user_id] = b; });
 
-      container.innerHTML = users.map(u => {
+      // Botón de descarga CSV
+      const downloadBtn = `
+        <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
+          <a href="${this.apiBase || '/api'}/admin/users/export-csv"
+             download="polla-usuarios.csv"
+             style="display:inline-flex;align-items:center;gap:6px;padding:7px 14px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:8px;color:var(--color-text-muted);font-size:12px;font-weight:600;text-decoration:none;cursor:pointer"
+             onclick="this.href='/api/admin/users/export-csv'">
+            📥 Descargar CSV
+          </a>
+        </div>`;
+
+      container.innerHTML = downloadBtn + users.map(u => {
         const bracket = bracketBy[u.id];
         const bracketChip = bracket
           ? (bracket.complete
