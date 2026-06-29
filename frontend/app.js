@@ -3432,8 +3432,23 @@ const app = {
     }
   },
 
+  async fixPredictionTime(userId, matchId, displayName) {
+    if (!confirm(`¿Corregir el timestamp de ${displayName} en ${matchId}?\n\nEsto le dará 8 puntos (exacto válido). Úsalo solo si el usuario predijo antes del partido pero el sistema registró la hora mal.`)) return;
+    try {
+      const result = await this.api(`/admin/predictions/${userId}/${matchId}/fix-time`, { method: 'PUT' });
+      alert(`✓ Corregido: ${result.message}\n\nRecarga la auditoría para ver el cambio.`);
+      // Recargar la auditoría
+      const old = document.getElementById('comp-audit-modal');
+      if (old) old.remove();
+      await this.showCompensationAudit(matchId);
+    } catch(e) {
+      alert('Error: ' + e.message);
+    }
+  },
+
   async showCompensationAudit(matchId) {
-    document.getElementById('comp-audit-modal')?.remove();
+    const existingAudit = document.getElementById('comp-audit-modal');
+    if (existingAudit) existingAudit.remove();
     const modal = document.createElement('div');
     modal.id = 'comp-audit-modal';
     modal.innerHTML = `
@@ -3473,12 +3488,16 @@ const app = {
         const badgeClass = p.pts_compensacion === 8 ? 'badge-8' : p.pts_compensacion === 5 ? 'badge-5' : 'badge-0';
         const tiempoClass = p.antes_del_partido === true ? 'before' : p.antes_del_partido === false ? 'after' : '';
         const tiempoLabel = p.antes_del_partido === true ? '✓ Antes' : p.antes_del_partido === false ? '✗ Después' : '—';
+        // Botón para corregir solo si tiene exacto pero aparece como "después"
+        const fixBtn = (p.exacto && p.antes_del_partido === false)
+          ? `<button onclick="app.fixPredictionTime(${p.user_id},'${matchId}','${p.display_name.replace(/'/g,"\\'")}')" style="margin-left:6px;font-size:10px;padding:1px 6px;border:1px solid #fbbf24;border-radius:6px;background:transparent;color:#fbbf24;cursor:pointer" title="Corregir timestamp — dar 8 pts">🔧 Corregir</button>`
+          : '';
         return `<tr>
           <td style="font-weight:500">${p.display_name}</td>
           <td style="text-align:center;font-weight:600">${p.pred || '<span style="color:var(--color-text-muted)">—</span>'}</td>
           <td style="text-align:center">${p.exacto ? '✓' : '—'}</td>
           <td style="font-size:11px;color:var(--color-text-muted)">${p.updated_at_ecu || '<em>Sin predicción</em>'}</td>
-          <td style="text-align:center" class="${tiempoClass}">${tiempoLabel}</td>
+          <td style="text-align:center" class="${tiempoClass}">${tiempoLabel}${fixBtn}</td>
           <td style="text-align:center"><span class="${badgeClass}">${p.pts_compensacion} pts</span></td>
         </tr>`;
       }).join('');
