@@ -1058,6 +1058,70 @@ app.get('/api/admin/compensated', authMiddleware, adminMiddleware, (req, res) =>
   res.json({ compensated: ids });
 });
 
+// Detalle de predicciones con timestamp para auditoría de un partido compensado
+app.get('/api/admin/compensated/:matchId/audit', authMiddleware, adminMiddleware, (req, res) => {
+  const { matchId } = req.params;
+  const match = db.prepare('SELECT * FROM matches WHERE id = ?').get(matchId);
+  if (!match) return res.status(404).json({ error: 'Partido no encontrado' });
+
+  // Hora de inicio del partido en ECU (UTC-5)
+  const matchStartUTC_ms = match.match_date && match.match_time
+    ? matchStartUTC(match.match_date, match.match_time).getTime()
+    : null;
+
+  const preds = db.prepare(`
+    SELECT u.id as user_id, u.display_name, u.username,
+           p.pred_home, p.pred_away, p.pred_winner, p.updated_at
+    FROM users u
+    LEFT JOIN predictions p ON p.user_id = u.id AND p.match_id = ?
+    WHERE u.is_admin = 0
+    ORDER BY p.updated_at ASC NULLS LAST
+  `).all(matchId);
+
+  const rows = preds.map(p => {
+    const predTime = p.updated_at
+      ? new Date(p.updated_at.replace(' ', 'T') + 'Z').getTime()
+      : null;
+
+    const acertoExacto = p.pred_home != null && p.pred_away != null &&
+      parseInt(p.pred_home) === match.home_score && parseInt(p.pred_away) === match.away_score;
+
+    const predAntes = predTime && matchStartUTC_ms
+      ? predTime <= matchStartUTC_ms
+      : null;
+
+    // Hora en formato ECU legible
+    const updated_at_ecu = p.updated_at
+      ? new Date(predTime - 5 * 60 * 60 * 1000).toISOString().replace('T', ' ').slice(0, 19) + ' (ECU)'
+      : null;
+
+    let pts_comp = 0;
+    if (p.pred_home != null || p.pred_winner != null) {
+      if (acertoExacto && predAntes) pts_comp = 8;
+      else pts_comp = 5;
+    }
+
+    return {
+      user_id: p.user_id,
+      display_name: p.display_name,
+      pred: p.pred_home != null ? `${p.pred_home}-${p.pred_away}` : (p.pred_winner || '—'),
+      exacto: acertoExacto,
+      updated_at_ecu,
+      antes_del_partido: predAntes,
+      pts_compensacion: pts_comp
+    };
+  });
+
+  const matchStartECU = matchStartUTC_ms
+    ? new Date(matchStartUTC_ms - 5 * 60 * 60 * 1000).toISOString().replace('T', ' ').slice(0, 16) + ' ECU'
+    : '?';
+
+  res.json({
+    match: { id: matchId, home: match.home_team, away: match.away_team, score: `${match.home_score}-${match.away_score}`, start: matchStartECU },
+    predictions: rows
+  });
+});
+
 // Agregar o quitar un partido de la lista de compensados
 app.put('/api/admin/compensated/:matchId', authMiddleware, adminMiddleware, (req, res) => {
   const { matchId } = req.params;
