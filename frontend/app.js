@@ -3418,11 +3418,91 @@ const app = {
       }
       div.innerHTML = '<strong style="color:var(--color-text-muted)">Compensados:</strong> ' + compensated.map(id => {
         const m = this.matches.find(mm => mm.id === id);
-        const label = m ? `${id}` : id;
-        return `<span style="display:inline-flex;align-items:center;gap:4px;background:rgba(251,191,36,0.12);border:1px solid rgba(251,191,36,0.3);border-radius:10px;padding:1px 8px;margin:2px">${label} <button onclick="app.compensateMatch('remove','${id}')" style="background:none;border:none;color:#fbbf24;cursor:pointer;font-size:13px;padding:0;line-height:1" title="Quitar compensación">✕</button></span>`;
+        const home = m?.home_team ? this.teamByCode(m.home_team)?.name : '?';
+        const away = m?.away_team ? this.teamByCode(m.away_team)?.name : '?';
+        const label = m ? `${id} (${home} vs ${away})` : id;
+        return `<span style="display:inline-flex;align-items:center;gap:4px;background:rgba(251,191,36,0.12);border:1px solid rgba(251,191,36,0.3);border-radius:10px;padding:2px 8px;margin:2px;font-size:11px">
+          ${label}
+          <button onclick="app.showCompensationAudit('${id}')" style="background:none;border:none;color:#60a5fa;cursor:pointer;font-size:11px;padding:0 2px" title="Ver quién predijo y cuándo">🔍</button>
+          <button onclick="app.compensateMatch('remove','${id}')" style="background:none;border:none;color:#fbbf24;cursor:pointer;font-size:13px;padding:0;line-height:1" title="Quitar compensación">✕</button>
+        </span>`;
       }).join('');
     } catch (e) {
       div.innerHTML = `<span style="color:var(--color-danger)">Error: ${e.message}</span>`;
+    }
+  },
+
+  async showCompensationAudit(matchId) {
+    document.getElementById('comp-audit-modal')?.remove();
+    const modal = document.createElement('div');
+    modal.id = 'comp-audit-modal';
+    modal.innerHTML = `
+      <style>
+        #comp-audit-modal { position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,0.88);display:flex;align-items:flex-start;justify-content:center;padding:20px 10px;overflow-y:auto; }
+        #comp-audit-modal .ca-panel { width:min(700px,100%);background:var(--color-background,#101018);border:1px solid var(--color-border);border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,0.5); }
+        #comp-audit-modal .ca-head { display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--color-border); }
+        #comp-audit-modal .ca-body { padding:14px 16px 20px;overflow-y:auto;max-height:80vh; }
+        #comp-audit-modal table { width:100%;border-collapse:collapse;font-size:12px; }
+        #comp-audit-modal th { font-size:10px;color:var(--color-text-muted);font-weight:600;padding:4px 8px;border-bottom:1px solid var(--color-border);text-align:left; }
+        #comp-audit-modal td { padding:5px 8px;border-bottom:1px solid rgba(255,255,255,0.04);vertical-align:middle; }
+        #comp-audit-modal tr:last-child td { border-bottom:none; }
+        #comp-audit-modal .badge-8 { background:rgba(201,168,76,0.2);color:#C9A84C;border:1px solid rgba(201,168,76,0.4);border-radius:8px;padding:1px 6px;font-weight:700;font-size:11px; }
+        #comp-audit-modal .badge-5 { background:rgba(255,255,255,0.06);color:var(--color-text-muted);border:1px solid var(--color-border);border-radius:8px;padding:1px 6px;font-size:11px; }
+        #comp-audit-modal .badge-0 { background:rgba(239,68,68,0.1);color:#f87171;border:1px solid rgba(239,68,68,0.2);border-radius:8px;padding:1px 6px;font-size:11px; }
+        #comp-audit-modal .before { color:#4ade80; }
+        #comp-audit-modal .after { color:#f87171; }
+      </style>
+      <div class="ca-panel">
+        <div class="ca-head">
+          <div style="font-weight:700;font-size:14px">🔍 Auditoría de compensación — <span style="color:var(--color-primary)">${matchId}</span></div>
+          <button onclick="document.getElementById('comp-audit-modal').remove()" style="background:transparent;border:1px solid var(--color-border);color:var(--color-text-muted);border-radius:8px;padding:4px 10px;cursor:pointer;font-size:13px">✕ Cerrar</button>
+        </div>
+        <div class="ca-body" id="comp-audit-content">
+          <div style="text-align:center;color:var(--color-text-muted);padding:2rem">Cargando...</div>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+    modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+
+    const container = document.getElementById('comp-audit-content');
+    try {
+      const data = await this.api(`/admin/compensated/${matchId}/audit`);
+      const { match, predictions } = data;
+
+      const rows = predictions.map(p => {
+        const badgeClass = p.pts_compensacion === 8 ? 'badge-8' : p.pts_compensacion === 5 ? 'badge-5' : 'badge-0';
+        const tiempoClass = p.antes_del_partido === true ? 'before' : p.antes_del_partido === false ? 'after' : '';
+        const tiempoLabel = p.antes_del_partido === true ? '✓ Antes' : p.antes_del_partido === false ? '✗ Después' : '—';
+        return `<tr>
+          <td style="font-weight:500">${p.display_name}</td>
+          <td style="text-align:center;font-weight:600">${p.pred || '<span style="color:var(--color-text-muted)">—</span>'}</td>
+          <td style="text-align:center">${p.exacto ? '✓' : '—'}</td>
+          <td style="font-size:11px;color:var(--color-text-muted)">${p.updated_at_ecu || '<em>Sin predicción</em>'}</td>
+          <td style="text-align:center" class="${tiempoClass}">${tiempoLabel}</td>
+          <td style="text-align:center"><span class="${badgeClass}">${p.pts_compensacion} pts</span></td>
+        </tr>`;
+      }).join('');
+
+      container.innerHTML = `
+        <div style="margin-bottom:12px;padding:8px 12px;background:var(--color-surface);border-radius:8px;font-size:12px">
+          <strong>${match.home} vs ${match.away}</strong> · Resultado: ${match.score} · 
+          <span style="color:var(--color-text-muted)">Inicio del partido: <strong>${match.start}</strong></span>
+        </div>
+        <div style="font-size:11px;color:var(--color-text-muted);margin-bottom:8px">
+          🟡 8 pts = acertó exacto Y predijo ANTES del partido · Gris 5 pts = compensación · Rojo 0 pts = sin predicción
+        </div>
+        <table>
+          <thead><tr>
+            <th>Usuario</th><th style="text-align:center">Pred</th><th style="text-align:center">Exacto</th>
+            <th>Hora predicción (ECU)</th><th style="text-align:center">¿Antes?</th><th style="text-align:center">Puntos</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+        <div style="margin-top:10px;font-size:11px;color:var(--color-text-muted);border-top:1px solid var(--color-border);padding-top:8px">
+          Esta tabla muestra la hora real en que cada usuario guardó su predicción. Los que predijeron después del inicio del partido no califican para los 8 puntos.
+        </div>`;
+    } catch(e) {
+      container.innerHTML = `<div style="color:var(--color-danger);padding:1rem">⚠️ ${e.message}</div>`;
     }
   },
 
