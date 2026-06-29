@@ -139,13 +139,30 @@ function calcUserTotalPoints(db, userId) {
   let winnerPts = 0;
   let compensatedPts = 0; // puntos otorgados por compensación
 
+  // Cargar updated_at de predicciones para la lógica de corte de compensación
+  let predUpdatedAt = {};
+  try {
+    const rows = db.prepare("SELECT match_id, updated_at FROM predictions WHERE user_id = ?").all(userId);
+    rows.forEach(r => { predUpdatedAt[r.match_id] = r.updated_at; });
+  } catch (e) { /* tabla puede no tener updated_at */ }
+
   for (const m of matches) {
-    // Compensación excepcional: quien acertó el marcador EXACTO recibe 8 pts
-    // (premio por haber pronosticado bien); todos los demás reciben 5 pts de piso.
+    // Compensación excepcional: exacto=8 pts solo si predijo ANTES del inicio del partido.
+    // Si predijo después (es decir, cuando el resultado ya era conocido), recibe 5 pts.
+    // Los demás (ganador equivocado, no predijo) reciben siempre 5 pts.
     if (compensated.has(m.id)) {
       const acertoExacto = m.pred_home != null && m.pred_away != null &&
         parseInt(m.pred_home) === m.home_score && parseInt(m.pred_away) === m.away_score;
-      if (acertoExacto) {
+
+      // Verificar que la predicción fue hecha antes del inicio del partido
+      let predAntes = true;
+      if (acertoExacto && m.match_date && m.match_time && predUpdatedAt[m.id]) {
+        const matchStart = new Date(m.match_date + 'T' + m.match_time + ':00-05:00').getTime();
+        const predTime = new Date(predUpdatedAt[m.id].replace(' ', 'T') + 'Z').getTime();
+        predAntes = predTime <= matchStart;
+      }
+
+      if (acertoExacto && predAntes) {
         total += 8;
         exactScores++;
         exactPts += 8;
