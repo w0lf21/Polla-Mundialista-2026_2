@@ -809,10 +809,29 @@ app.get('/api/users/:id/compare', authMiddleware, (req, res) => {
   const rivalUser = db.prepare('SELECT id, display_name FROM users WHERE id = ?').get(rivalId);
   if (!rivalUser) return res.status(404).json({ error: 'Usuario no encontrado' });
 
-  // Puntos según la fase activa
-  const leaderboardEndpoint = phase === 'knockout' ? 'knockout' : 'groups';
-  const myStats = calcUserTotalPoints(db, myId);
-  const rivalStats = calcUserTotalPoints(db, rivalId);
+  // Calcular puntos solo de la fase solicitada
+  function calcPhasePoints(userId, phaseFilter) {
+    const matches = db.prepare(`
+      SELECT m.*, p.pred_home, p.pred_away, p.pred_winner, p.pred_pen_home, p.pred_pen_away
+      FROM matches m
+      LEFT JOIN predictions p ON p.match_id = m.id AND p.user_id = ?
+      WHERE m.home_score IS NOT NULL
+        AND ${phaseFilter === 'knockout' ? "m.phase != 'groups'" : "m.phase = 'groups'"}
+    `).all(userId);
+    const compRow = db.prepare("SELECT value FROM settings WHERE key='compensated_matches'").get();
+    const compensated = new Set(compRow?.value ? compRow.value.split(',').map(s=>s.trim()).filter(Boolean) : []);
+    let total = 0;
+    for (const m of matches) {
+      if (compensated.has(m.id)) { total += 5; continue; }
+      if (m.pred_home == null && m.pred_winner == null) continue;
+      total += phaseFilter === 'knockout' ? calcKOMatchPoints(m, m) : calcGroupMatchPoints(m, m);
+    }
+    return total;
+  }
+
+  const myPoints   = calcPhasePoints(myId,    phase);
+  const rivalPoints = calcPhasePoints(rivalId, phase);
+  const gap = rivalPoints - myPoints;
 
   // Filtrar partidos pendientes según fase
   const phaseFilter = phase === 'knockout' ? `m.phase != 'groups'` : `m.phase = 'groups'`;
@@ -864,19 +883,14 @@ app.get('/api/users/:id/compare', authMiddleware, (req, res) => {
     };
   }).filter(Boolean);
 
-  // Calcular puntos por fase
-  const mePoints = phase === 'knockout' ? (myStats.total - (myStats.groupPts||0)) : myStats.total;
-  const rivalPoints = phase === 'knockout' ? (rivalStats.total - (rivalStats.groupPts||0)) : rivalStats.total;
-
   const gold    = analysis.filter(m => m.net_gain === 5);
   const silver  = analysis.filter(m => m.net_gain > 0 && m.net_gain < 5);
   const neutral = analysis.filter(m => m.net_gain === 0);
-  const gap = rivalStats.total - myStats.total;
   const maxGain = gold.length * 5 + silver.reduce((s, m) => s + m.net_gain, 0);
 
   res.json({
-    me: { id: myId, points: myStats.total },
-    rival: { id: rivalId, display_name: rivalUser.display_name, points: rivalStats.total },
+    me: { id: myId, points: myPoints },
+    rival: { id: rivalId, display_name: rivalUser.display_name, points: rivalPoints },
     gap, canCatchUp: maxGain >= gap, gold, silver, neutral, totalPending: analysis.length,
     phase
   });
