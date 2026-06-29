@@ -803,78 +803,82 @@ app.get('/api/users/:id/points-breakdown', authMiddleware, (req, res) => {
 app.get('/api/users/:id/compare', authMiddleware, (req, res) => {
   const myId = req.user.id;
   const rivalId = parseInt(req.params.id);
+  const phase = req.query.phase || 'knockout'; // 'groups' o 'knockout'
   if (myId === rivalId) return res.status(400).json({ error: 'No puedes compararte contigo mismo' });
 
   const rivalUser = db.prepare('SELECT id, display_name FROM users WHERE id = ?').get(rivalId);
   if (!rivalUser) return res.status(404).json({ error: 'Usuario no encontrado' });
 
-  // Mis puntos actuales vs los del rival
+  // Puntos según la fase activa
+  const leaderboardEndpoint = phase === 'knockout' ? 'knockout' : 'groups';
   const myStats = calcUserTotalPoints(db, myId);
   const rivalStats = calcUserTotalPoints(db, rivalId);
 
-  // Partidos pendientes con ambos pronósticos
+  // Filtrar partidos pendientes según fase
+  const phaseFilter = phase === 'knockout' ? `m.phase != 'groups'` : `m.phase = 'groups'`;
   const pending = db.prepare(`
     SELECT m.id, m.home_team, m.away_team, m.group_name, m.phase, m.match_date
     FROM matches m
-    WHERE m.home_score IS NULL AND m.phase = 'groups'
+    WHERE m.home_score IS NULL AND ${phaseFilter}
+    AND m.home_team IS NOT NULL AND m.away_team IS NOT NULL
     ORDER BY m.match_date, m.id
   `).all();
 
   const teamMap = Object.fromEntries(db.prepare('SELECT * FROM teams').all().map(t => [t.code, t]));
 
   const analysis = pending.map(m => {
-    const myPred = db.prepare('SELECT pred_home, pred_away FROM predictions WHERE user_id=? AND match_id=?').get(myId, m.id);
-    const rivalPred = db.prepare('SELECT pred_home, pred_away FROM predictions WHERE user_id=? AND match_id=?').get(rivalId, m.id);
-    if (!myPred || myPred.pred_home == null) return null;
+    const myPred = db.prepare('SELECT pred_home, pred_away, pred_winner FROM predictions WHERE user_id=? AND match_id=?').get(myId, m.id);
+    const rivalPred = db.prepare('SELECT pred_home, pred_away, pred_winner FROM predictions WHERE user_id=? AND match_id=?').get(rivalId, m.id);
+    if (!myPred || (myPred.pred_home == null && myPred.pred_winner == null)) return null;
 
-    // Simular qué pasa si sale MI exacto
-    const simH = parseInt(myPred.pred_home), simA = parseInt(myPred.pred_away);
+    const simH = myPred.pred_home != null ? parseInt(myPred.pred_home) : null;
+    const simA = myPred.pred_away != null ? parseInt(myPred.pred_away) : null;
+    const myWinner = simH != null && simA != null ? (simH > simA ? m.home_team : simA > simH ? m.away_team : myPred.pred_winner) : myPred.pred_winner;
 
-    const myPts = 5; // si sale mi exacto, yo siempre saco 5
+    const myPts = 5;
     let rivalPts = 0;
-    if (rivalPred && rivalPred.pred_home != null) {
-      const rph = parseInt(rivalPred.pred_home), rpa = parseInt(rivalPred.pred_away);
-      if (rph === simH && rpa === simA) rivalPts = 5;
-      else {
-        const pr = rph > rpa ? 'H' : rph < rpa ? 'A' : 'D';
-        const rr = simH > simA ? 'H' : simH < simA ? 'A' : 'D';
-        if (pr === rr) rivalPts = Math.abs(rph-rpa) === Math.abs(simH-simA) ? 3 : 2;
+    if (rivalPred && (rivalPred.pred_home != null || rivalPred.pred_winner != null)) {
+      const rph = rivalPred.pred_home != null ? parseInt(rivalPred.pred_home) : null;
+      const rpa = rivalPred.pred_away != null ? parseInt(rivalPred.pred_away) : null;
+      if (rph != null && simH != null) {
+        if (rph === simH && rpa === simA) rivalPts = 5;
+        else {
+          const pr = rph > rpa ? 'H' : rph < rpa ? 'A' : 'D';
+          const rr = simH > simA ? 'H' : simH < simA ? 'A' : 'D';
+          if (pr === rr) rivalPts = Math.abs(rph-rpa) === Math.abs(simH-simA) ? 3 : 2;
+        }
+      } else if (myWinner && rivalPred.pred_winner === myWinner) {
+        rivalPts = 2;
       }
     }
 
+    const myPredStr = simH != null ? `${simH}-${simA}` : (myWinner ? teamMap[myWinner]?.name||myWinner : '—');
+    const rivalPredStr = rivalPred?.pred_home != null ? `${rivalPred.pred_home}-${rivalPred.pred_away}` : (rivalPred?.pred_winner ? teamMap[rivalPred.pred_winner]?.name||rivalPred.pred_winner : '–');
+
     return {
-      match_id: m.id,
-      group_name: m.group_name,
-      match_date: m.match_date,
-      home_flag: teamMap[m.home_team]?.flag || '?',
-      away_flag: teamMap[m.away_team]?.flag || '?',
-      home_name: teamMap[m.home_team]?.name || m.home_team,
-      away_name: teamMap[m.away_team]?.name || m.away_team,
-      my_pred: `${myPred.pred_home}-${myPred.pred_away}`,
-      rival_pred: (rivalPred && rivalPred.pred_home != null) ? `${rivalPred.pred_home}-${rivalPred.pred_away}` : '–',
-      my_pts: myPts,
-      rival_pts: rivalPts,
-      net_gain: myPts - rivalPts  // ganancia neta vs el rival si sale mi exacto
+      match_id: m.id, group_name: m.group_name, match_date: m.match_date, phase: m.phase,
+      home_flag: teamMap[m.home_team]?.flag||'?', away_flag: teamMap[m.away_team]?.flag||'?',
+      home_name: teamMap[m.home_team]?.name||m.home_team, away_name: teamMap[m.away_team]?.name||m.away_team,
+      my_pred: myPredStr, rival_pred: rivalPredStr,
+      my_pts: myPts, rival_pts: rivalPts, net_gain: myPts - rivalPts
     };
   }).filter(Boolean);
 
-  // Clasificar por impacto
-  const gold = analysis.filter(m => m.net_gain === 5);   // yo 5, rival 0
-  const silver = analysis.filter(m => m.net_gain > 0 && m.net_gain < 5); // yo 5, rival algo
-  const neutral = analysis.filter(m => m.net_gain === 0); // ambos 5 (mismo exacto)
+  // Calcular puntos por fase
+  const mePoints = phase === 'knockout' ? (myStats.total - (myStats.groupPts||0)) : myStats.total;
+  const rivalPoints = phase === 'knockout' ? (rivalStats.total - (rivalStats.groupPts||0)) : rivalStats.total;
 
+  const gold    = analysis.filter(m => m.net_gain === 5);
+  const silver  = analysis.filter(m => m.net_gain > 0 && m.net_gain < 5);
+  const neutral = analysis.filter(m => m.net_gain === 0);
   const gap = rivalStats.total - myStats.total;
-  const maxGainIfAllGold = gold.length * 5 + silver.reduce((s, m) => s + m.net_gain, 0);
+  const maxGain = gold.length * 5 + silver.reduce((s, m) => s + m.net_gain, 0);
 
   res.json({
     me: { id: myId, points: myStats.total },
     rival: { id: rivalId, display_name: rivalUser.display_name, points: rivalStats.total },
-    gap,
-    canCatchUp: maxGainIfAllGold >= gap,
-    gold,      // partidos donde si sale mi exacto, rival saca 0 — máxima ganancia neta +5
-    silver,    // partidos donde si sale mi exacto, rival saca algo pero yo más — ganancia +2 o +3
-    neutral,   // mismo pronóstico exacto — no mueve la brecha
-    totalPending: analysis.length
+    gap, canCatchUp: maxGain >= gap, gold, silver, neutral, totalPending: analysis.length,
+    phase
   });
 });
 app.get('/api/leaderboard/daily-top', authMiddleware, (req, res) => {
