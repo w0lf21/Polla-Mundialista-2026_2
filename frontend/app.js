@@ -3432,6 +3432,69 @@ const app = {
     }
   },
 
+  async exportUsersXlsx() {
+    try {
+      // Cargar SheetJS dinámicamente si no está disponible
+      if (!window.XLSX) {
+        await new Promise((resolve, reject) => {
+          const s = document.createElement('script');
+          s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+          s.onload = resolve; s.onerror = reject;
+          document.head.appendChild(s);
+        });
+      }
+      const XLSX = window.XLSX;
+
+      // Cargar datos con el token JWT (llamada autenticada)
+      const [users, bracketData, lb1, lb2] = await Promise.all([
+        this.api('/admin/users'),
+        this.api('/admin/bracket-completion').catch(() => ({ users: [], totalKO: 0 })),
+        this.api('/leaderboard/groups').catch(() => ({ leaderboard: [] })),
+        this.api('/leaderboard/knockout').catch(() => ({ leaderboard: [] }))
+      ]);
+
+      const bracketBy = Object.fromEntries((bracketData.users || []).map(b => [b.user_id, b]));
+      const ptsGroups = Object.fromEntries((lb1.leaderboard || []).map(u => [u.user_id, u.points]));
+      const ptsKO = Object.fromEntries((lb2.leaderboard || []).map(u => [u.user_id, u.points]));
+
+      // Construir filas
+      const rows = users
+        .filter(u => !u.is_admin)
+        .map(u => {
+          const bracket = bracketBy[u.id] || {};
+          return {
+            'Nombre':             u.display_name,
+            'Usuario':            u.username,
+            'Pagó Grupos':        u.paid_groups  ? 'Sí' : 'No',
+            'Pagó Eliminatorias': u.paid_knockout ? 'Sí' : 'No',
+            'Pts Grupos':         ptsGroups[u.id] ?? 0,
+            'Pts Eliminatorias':  ptsKO[u.id]     ?? 0,
+            'Bracket KO':         `${bracket.filled ?? 0}/${bracket.total ?? 0}`,
+            'Bracket Completo':   bracket.complete ? 'Sí' : 'No',
+          };
+        })
+        .sort((a, b) => a['Nombre'].localeCompare(b['Nombre']));
+
+      // Crear workbook
+      const ws = XLSX.utils.json_to_sheet(rows);
+
+      // Ancho de columnas
+      ws['!cols'] = [
+        { wch: 22 }, { wch: 14 }, { wch: 13 }, { wch: 18 },
+        { wch: 11 }, { wch: 18 }, { wch: 11 }, { wch: 16 }
+      ];
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Participantes');
+
+      // Descargar
+      const fecha = new Date().toISOString().slice(0, 10);
+      XLSX.writeFile(wb, `polla-participantes-${fecha}.xlsx`);
+    } catch (e) {
+      alert('Error al generar el Excel: ' + e.message);
+    }
+  },
+
   async fixPredictionTime(userId, matchId, displayName) {
     if (!confirm(`¿Corregir el timestamp de ${displayName} en ${matchId}?\n\nEsto le dará 8 puntos (exacto válido). Úsalo solo si el usuario predijo antes del partido pero el sistema registró la hora mal.`)) return;
     try {
@@ -3659,15 +3722,12 @@ const app = {
       const bracketBy = {};
       (bracketData.users || []).forEach(b => { bracketBy[b.user_id] = b; });
 
-      // Botón de descarga CSV
+      // Botón de descarga xlsx (generado en el frontend con los datos ya cargados)
       const downloadBtn = `
         <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
-          <a href="${this.apiBase || '/api'}/admin/users/export-csv"
-             download="polla-usuarios.csv"
-             style="display:inline-flex;align-items:center;gap:6px;padding:7px 14px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:8px;color:var(--color-text-muted);font-size:12px;font-weight:600;text-decoration:none;cursor:pointer"
-             onclick="this.href='/api/admin/users/export-csv'">
-            📥 Descargar CSV
-          </a>
+          <button onclick="app.exportUsersXlsx()" style="display:inline-flex;align-items:center;gap:6px;padding:7px 14px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:8px;color:var(--color-text-muted);font-size:12px;font-weight:600;cursor:pointer">
+            📥 Descargar Excel
+          </button>
         </div>`;
 
       container.innerHTML = downloadBtn + users.map(u => {
