@@ -1890,6 +1890,55 @@ app.put('/api/admin/podium', authMiddleware, adminMiddleware, (req, res) => {
   res.json({ success: true });
 });
 
+// Exportar reporte CSV de usuarios con pagos y estado del bracket
+app.get('/api/admin/users/export-csv', authMiddleware, adminMiddleware, (req, res) => {
+  const users = db.prepare(`
+    SELECT u.id, u.display_name, u.username,
+           MAX(CASE WHEN r.polla='groups'   AND r.paid=1 THEN 1 ELSE 0 END) as paid_groups,
+           MAX(CASE WHEN r.polla='knockout' AND r.paid=1 THEN 1 ELSE 0 END) as paid_knockout
+    FROM users u
+    LEFT JOIN polla_registrations r ON r.user_id = u.id
+    WHERE u.is_admin = 0
+    GROUP BY u.id
+    ORDER BY u.display_name
+  `).all();
+
+  const koMatches = db.prepare("SELECT id FROM matches WHERE phase != 'groups'").all();
+  const totalKO = koMatches.length;
+
+  const rows = users.map(u => {
+    const filled = db.prepare(`
+      SELECT COUNT(DISTINCT p.match_id) as c
+      FROM predictions p
+      JOIN matches m ON m.id = p.match_id
+      WHERE p.user_id = ? AND m.phase != 'groups'
+        AND (p.pred_home IS NOT NULL OR p.pred_winner IS NOT NULL)
+    `).get(u.id).c;
+
+    const ptsGroups   = calcUserTotalPoints ? null : null; // solo scoring de grupos si se quiere
+    const complete    = filled >= totalKO;
+
+    // Escapar campos para CSV
+    const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+
+    return [
+      esc(u.display_name),
+      esc(u.username),
+      esc(u.paid_groups  ? 'Sí' : 'No'),
+      esc(u.paid_knockout ? 'Sí' : 'No'),
+      esc(`${filled}/${totalKO}`),
+      esc(complete ? 'Completo' : 'Incompleto')
+    ].join(',');
+  });
+
+  const header = '"Nombre","Usuario","Pagó Grupos","Pagó Eliminatorias","Bracket KO","Estado Bracket"';
+  const csv = [header, ...rows].join('\r\n');
+
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="polla-usuarios.csv"');
+  res.send('\uFEFF' + csv); // BOM para que Excel lo abra bien
+});
+
 app.get('/api/admin/users', authMiddleware, adminMiddleware, (req, res) => {
   const users = db.prepare('SELECT id, username, display_name, is_admin, paid_entry, created_at FROM users ORDER BY created_at DESC').all();
   const result = users.map(u => {
