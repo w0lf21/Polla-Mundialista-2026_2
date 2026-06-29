@@ -140,10 +140,19 @@ function calcUserTotalPoints(db, userId) {
   let compensatedPts = 0; // puntos otorgados por compensación
 
   for (const m of matches) {
-    // Compensación: 5 pts fijos sin importar predicción (ni siquiera requiere haber pronosticado)
+    // Compensación excepcional: quien acertó el marcador EXACTO recibe 8 pts
+    // (premio por haber pronosticado bien); todos los demás reciben 5 pts de piso.
     if (compensated.has(m.id)) {
-      total += 5;
-      compensatedPts += 5;
+      const acertoExacto = m.pred_home != null && m.pred_away != null &&
+        parseInt(m.pred_home) === m.home_score && parseInt(m.pred_away) === m.away_score;
+      if (acertoExacto) {
+        total += 8;
+        exactScores++;
+        exactPts += 8;
+      } else {
+        total += 5;
+        compensatedPts += 5;
+      }
       continue;
     }
 
