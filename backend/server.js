@@ -596,6 +596,9 @@ app.get('/api/leaderboard/groups', (req, res) => {
     WHERE r.polla = 'groups' AND r.paid = 1
   `).all();
 
+  const compRowG = db.prepare("SELECT value FROM settings WHERE key = 'compensated_matches'").get();
+  const compensatedSetG = new Set(compRowG && compRowG.value ? compRowG.value.split(',').map(s => s.trim()).filter(Boolean) : []);
+
   const leaderboard = regs.map(u => {
     const matches = db.prepare(`
       SELECT m.*, p.pred_home, p.pred_away
@@ -606,6 +609,13 @@ app.get('/api/leaderboard/groups', (req, res) => {
 
     let total = 0, correct = 0, exact = 0, exactPts = 0, diffCount = 0, diffPts = 0, winnerCount = 0, winnerPts = 0;
     for (const m of matches) {
+      if (compensatedSetG.has(m.id)) {
+        const acertoExacto = m.pred_home != null && m.pred_away != null &&
+          parseInt(m.pred_home) === m.home_score && parseInt(m.pred_away) === m.away_score;
+        if (acertoExacto) { total += 8; exact++; exactPts += 8; }
+        else { total += 5; exact++; exactPts += 5; }
+        continue;
+      }
       const pts = calcGroupMatchPoints(m, m);
       if (pts === 0) continue;
       total += pts;
@@ -644,6 +654,10 @@ app.get('/api/leaderboard/knockout', (req, res) => {
     WHERE r.polla = 'knockout' AND r.paid = 1
   `).all();
 
+  // Partidos compensados: 5 pts fijos a todos los inscritos
+  const compRow = db.prepare("SELECT value FROM settings WHERE key = 'compensated_matches'").get();
+  const compensatedSet = new Set(compRow && compRow.value ? compRow.value.split(',').map(s => s.trim()).filter(Boolean) : []);
+
   const leaderboard = regs.map(u => {
     const matches = db.prepare(`
       SELECT m.*, p.pred_home, p.pred_away, p.pred_winner, p.pred_pen_home, p.pred_pen_away
@@ -654,6 +668,14 @@ app.get('/api/leaderboard/knockout', (req, res) => {
 
     let total = 0, correct = 0, exact = 0, exactPts = 0, diffCount = 0, diffPts = 0, winnerCount = 0, winnerPts = 0;
     for (const m of matches) {
+      // Compensación excepcional: exacto = 8 pts, los demás = 5 pts
+      if (compensatedSet.has(m.id)) {
+        const acertoExacto = m.pred_home != null && m.pred_away != null &&
+          parseInt(m.pred_home) === m.home_score && parseInt(m.pred_away) === m.away_score;
+        if (acertoExacto) { total += 8; exact++; exactPts += 8; }
+        else { total += 5; exact++; exactPts += 5; }
+        continue;
+      }
       const pts = calcKOMatchPoints(m, m);
       if (pts === 0) continue;
       total += pts;
@@ -698,18 +720,21 @@ app.get('/api/leaderboard', (req, res) => {
 // Detalle de puntos partido a partido de un usuario (accesible a cualquier autenticado)
 app.get('/api/users/:id/points-breakdown', authMiddleware, (req, res) => {
   const targetId = parseInt(req.params.id);
+  const phaseFilter = req.query.phase || null; // 'groups', 'knockout', o null (todos)
   const targetUser = db.prepare('SELECT id, display_name FROM users WHERE id = ?').get(targetId);
   if (!targetUser) return res.status(404).json({ error: 'Usuario no encontrado' });
 
-  const matches = db.prepare(`
+  let matchQuery = `
     SELECT m.id, m.phase, m.group_name, m.home_team, m.away_team,
            m.home_score, m.away_score, m.match_date, m.match_time,
            p.pred_home, p.pred_away, p.pred_winner
     FROM matches m
     LEFT JOIN predictions p ON p.match_id = m.id AND p.user_id = ?
-    WHERE m.home_score IS NOT NULL AND m.away_score IS NOT NULL
-    ORDER BY m.match_date ASC, m.match_time ASC
-  `).all(targetId);
+    WHERE m.home_score IS NOT NULL AND m.away_score IS NOT NULL`;
+  if (phaseFilter === 'groups') matchQuery += ` AND m.phase = 'groups'`;
+  else if (phaseFilter === 'knockout') matchQuery += ` AND m.phase != 'groups'`;
+  matchQuery += ` ORDER BY m.match_date ASC, m.match_time ASC`;
+  const matches = db.prepare(matchQuery).all(targetId);
 
   const teamMap = Object.fromEntries(
     db.prepare('SELECT * FROM teams').all().map(t => [t.code, t])
@@ -839,17 +864,22 @@ app.get('/api/users/:id/compare', authMiddleware, (req, res) => {
   });
 });
 app.get('/api/leaderboard/daily-top', authMiddleware, (req, res) => {
-  // "Ayer" en hora Ecuador (UTC-5): restar 5h al UTC actual y tomar la fecha
+  const phaseFilter = req.query.phase || null; // 'groups', 'knockout', o null (todos)
+
+  // "Ayer" en hora Ecuador (UTC-5)
   const nowECU = new Date(Date.now() - 5 * 60 * 60 * 1000);
   const yesterdayECU = new Date(nowECU);
   yesterdayECU.setUTCDate(yesterdayECU.getUTCDate() - 1);
-  const yesterday = yesterdayECU.toISOString().slice(0, 10); // YYYY-MM-DD
+  const yesterday = yesterdayECU.toISOString().slice(0, 10);
 
-  const matchesYesterday = db.prepare(`
-    SELECT m.id, m.home_score, m.away_score, m.phase, m.winner, m.pen_home, m.pen_away
-    FROM matches m
-    WHERE m.match_date = ? AND m.home_score IS NOT NULL
-  `).all(yesterday);
+  // Filtrar por fase si se especifica
+  let matchQuery = `SELECT m.id, m.home_score, m.away_score, m.phase, m.winner, m.pen_home, m.pen_away
+    FROM matches m WHERE m.match_date = ? AND m.home_score IS NOT NULL`;
+  const matchParams = [yesterday];
+  if (phaseFilter === 'groups') { matchQuery += ` AND m.phase = 'groups'`; }
+  else if (phaseFilter === 'knockout') { matchQuery += ` AND m.phase != 'groups'`; }
+
+  const matchesYesterday = db.prepare(matchQuery).all(...matchParams);
 
   if (!matchesYesterday.length) {
     return res.json({ date: yesterday, top: [], hasData: false });
