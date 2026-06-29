@@ -656,7 +656,7 @@ const app = {
         .bk-name { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
         .bk-score { font-weight:700; font-size:12px; flex-shrink:0; }
         .bk-pick-dot { color:#60a5fa; font-size:8px; flex-shrink:0; }
-        .bk-mypred { font-size:9px; color:var(--color-text-muted); padding:2px 7px; background:rgba(96,165,250,0.06); border-top:1px solid var(--color-border); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .bk-mypred { font-size:13px; color:var(--color-text); padding:4px 8px; background:rgba(96,165,250,0.08); border-top:1px solid var(--color-border); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-weight:500; }
 
         /* ── Bracket pathway (siempre visible, scroll horizontal en mobile) ── */
         .pw-bracket {
@@ -1036,7 +1036,7 @@ const app = {
 
   // ── COMPARARME CON OTRO JUGADOR ─────────────────────────────────────────────
 
-  async showCompare(rivalId, rivalName) {
+  async showCompare(rivalId, rivalName, phase) {
     document.getElementById('compare-modal')?.remove();
     const modal = document.createElement('div');
     modal.id = 'compare-modal';
@@ -1087,7 +1087,7 @@ const app = {
 
     const container = document.getElementById('compare-content');
     try {
-      const data = await this.api(`/users/${rivalId}/compare`);
+      const data = await this.api(`/users/${rivalId}/compare?phase=${phase||'knockout'}`);
       const { me, rival, gap, canCatchUp, gold, silver, neutral, totalPending } = data;
 
       const alertClass = gap <= 0 ? 'good' : canCatchUp ? 'warn' : 'bad';
@@ -1259,7 +1259,80 @@ const app = {
     return 'groups';
   },
 
-  async showUserPredictions(userId) {
+  // Bracket KO de las predicciones de un usuario (solo eliminatorias)
+  _renderUserKOBracket(upreds) {
+    const matchById = Object.fromEntries(this.matches.map(m => [m.id, m]));
+    const QF_PAIRS = {'QF-1':['R32-3','R32-5'],'QF-2':['R32-1','R32-4'],'QF-3':['R32-2','R32-6'],'QF-4':['R32-7','R32-8'],'QF-5':['R32-11','R32-12'],'QF-6':['R32-9','R32-10'],'QF-7':['R32-14','R32-16'],'QF-8':['R32-13','R32-15']};
+    const SF_PAIRS = {'SF-1':['QF-1','QF-2'],'SF-2':['QF-5','QF-6'],'SF-3':['QF-3','QF-4'],'SF-4':['QF-7','QF-8'],'SF-5':['SF-1','SF-2'],'SF-6':['SF-3','SF-4']};
+
+    const winnerOf = (matchId, homeCode, awayCode) => {
+      const pred = upreds[matchId];
+      if (!pred) return null;
+      const ph = pred.pred_home != null ? parseInt(pred.pred_home) : null;
+      const pa = pred.pred_away != null ? parseInt(pred.pred_away) : null;
+      if (ph != null && pa != null && ph !== pa) return ph > pa ? homeCode : awayCode;
+      return pred.pred_winner || null;
+    };
+
+    const resolveMatch = (matchId) => {
+      const real = matchById[matchId];
+      if (matchId.startsWith('R32')) return { home: real?.home_team||null, away: real?.away_team||null };
+      const pair = QF_PAIRS[matchId] || SF_PAIRS[matchId] || (['FINAL','TP'].includes(matchId) ? ['SF-5','SF-6'] : null);
+      if (!pair) return { home:null, away:null };
+      const [a, b] = pair;
+      const ra = resolveMatch(a), rb = resolveMatch(b);
+      return { home: real?.home_team || winnerOf(a, ra.home, ra.away), away: real?.away_team || winnerOf(b, rb.home, rb.away) };
+    };
+
+    const bkCard = (matchId) => {
+      const { home, away } = resolveMatch(matchId);
+      const pred = upreds[matchId];
+      const ht = home ? this.teamByCode(home) : null;
+      const at = away ? this.teamByCode(away) : null;
+      const ph = pred?.pred_home != null ? pred.pred_home : null;
+      const pa = pred?.pred_away != null ? pred.pred_away : null;
+      const winner = winnerOf(matchId, home, away);
+      const wt = winner ? this.teamByCode(winner) : null;
+      if (!ht && !at) return `<div class="updm-bk empty">Sin definir</div>`;
+      return `<div class="updm-bk">
+        <div class="updm-team"><span class="updm-flag">${ht?.flag||'?'}</span><span class="updm-name">${ht?.name||'???'}</span>${ph!=null?`<span style="font-weight:700;font-size:12px;margin-left:auto">${ph}</span>`:''}</div>
+        <div class="updm-team"><span class="updm-flag">${at?.flag||'?'}</span><span class="updm-name">${at?.name||'???'}</span>${pa!=null?`<span style="font-weight:700;font-size:12px;margin-left:auto">${pa}</span>`:''}</div>
+        ${wt ? `<div style="font-size:10px;color:#C9A84C;padding:2px 7px;border-top:1px solid var(--color-border);background:rgba(201,168,76,0.06)">→ ${wt.flag} ${wt.name}</div>` : ''}
+      </div>`;
+    };
+
+    const col = (ids, label) => `
+      <div class="updm-col">
+        <div class="updm-clabel">${label}</div>
+        <div class="updm-cmatches">${ids.map(id => bkCard(id)).join('')}</div>
+      </div>`;
+
+    return `
+      <div class="updm-bwrap">
+        <div class="updm-bracket">
+          <div class="updm-side">
+            ${col(['R32-3','R32-5','R32-1','R32-4','R32-2','R32-6','R32-7','R32-8'],'Dieciseisavos')}
+            ${col(['QF-1','QF-2','QF-3','QF-4'],'Octavos')}
+            ${col(['SF-1','SF-2'],'Cuartos')}
+            ${col(['SF-5'],'Semis')}
+          </div>
+          <div class="updm-center">
+            <div class="updm-clabel" style="text-align:center">Final</div>
+            ${bkCard('FINAL')}
+            <div class="updm-clabel" style="text-align:center;margin-top:8px">3er Puesto</div>
+            ${bkCard('TP')}
+          </div>
+          <div class="updm-side updm-right">
+            ${col(['SF-6'],'Semis')}
+            ${col(['SF-3','SF-4'],'Cuartos')}
+            ${col(['QF-5','QF-6','QF-7','QF-8'],'Octavos')}
+            ${col(['R32-11','R32-12','R32-9','R32-10','R32-14','R32-16','R32-13','R32-15'],'Dieciseisavos')}
+          </div>
+        </div>
+      </div>`;
+  },
+
+  async showUserPredictions(userId, phase) {
     const displayName = (this._lbNames && this._lbNames[userId]) || 'Participante';
     document.getElementById('user-pred-modal')?.remove();
 
@@ -1340,6 +1413,21 @@ const app = {
 
       const groupColors = { A:'#1a5c8a',B:'#6b21a8',C:'#166534',D:'#991b1b',E:'#0f766e',F:'#92400e',G:'#5b21b6',H:'#1e40af',I:'#9d174d',J:'#065f46',K:'#7c2d12',L:'#164e63' };
       const groupMatches = this.matches.filter(m => m.phase === 'groups');
+      const koMatches = this.matches.filter(m => m.phase !== 'groups');
+
+      // Si es fase de eliminatorias, mostrar solo el bracket KO
+      if (phase === 'knockout') {
+        const filledKO = koMatches.filter(m => upreds[m.id] && (upreds[m.id].pred_home != null || upreds[m.id].pred_winner != null)).length;
+        if (filledKO === 0) {
+          container.innerHTML = `<div style="text-align:center;padding:2rem;color:var(--color-text-muted)">📝 ${displayName} aún no tiene pronósticos de eliminatorias.</div>`;
+          return;
+        }
+        // Renderizar bracket KO del usuario
+        const bracketHtml = this._renderUserKOBracket(upreds, displayName);
+        container.innerHTML = bracketHtml;
+        return;
+      }
+
       const filledGroup = groupMatches.filter(m => upreds[m.id] && upreds[m.id].pred_home != null).length;
 
       if (filledGroup === 0) {
