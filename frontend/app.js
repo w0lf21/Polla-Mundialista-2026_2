@@ -2173,48 +2173,77 @@ const app = {
   // ── PODIO ───────────────────────────────────────────────────────────────────
 
   async renderPodium(main) {
-    // Equipos reales del admin (no de pronósticos en cascada)
-    const finalMatch = this.matches.find(m => m.id === 'FINAL');
-    const tpMatch = this.matches.find(m => m.id === 'TP');
+    main.innerHTML = '<h2>Podio final</h2><div style="color:var(--color-text-muted)">Cargando...</div>';
 
-    const finalPred = this.predictions['FINAL'] || {};
-    const tpPred = this.predictions['TP'] || {};
+    // Cascada de predicciones del usuario (misma lógica que _renderUserKOBracket)
+    const matchById = Object.fromEntries(this.matches.map(m => [m.id, m]));
+    const QF_PAIRS = {'QF-1':['R32-3','R32-5'],'QF-2':['R32-1','R32-4'],'QF-3':['R32-2','R32-6'],'QF-4':['R32-7','R32-8'],'QF-5':['R32-11','R32-12'],'QF-6':['R32-9','R32-10'],'QF-7':['R32-14','R32-16'],'QF-8':['R32-13','R32-15']};
+    const SF_PAIRS = {'SF-1':['QF-1','QF-2'],'SF-2':['QF-5','QF-6'],'SF-3':['QF-3','QF-4'],'SF-4':['QF-7','QF-8'],'SF-5':['SF-1','SF-2'],'SF-6':['SF-3','SF-4']};
+    const preds = this.predictions || {};
 
-    const finalHome = finalMatch?.home_team ? this.teamByCode(finalMatch.home_team) : null;
-    const finalAway = finalMatch?.away_team ? this.teamByCode(finalMatch.away_team) : null;
-    const tpHome = tpMatch?.home_team ? this.teamByCode(tpMatch.home_team) : null;
-    const tpAway = tpMatch?.away_team ? this.teamByCode(tpMatch.away_team) : null;
+    const winnerOf = (matchId, homeCode, awayCode) => {
+      const pred = preds[matchId];
+      if (!pred) return null;
+      const ph = pred.pred_home != null ? parseInt(pred.pred_home) : null;
+      const pa = pred.pred_away != null ? parseInt(pred.pred_away) : null;
+      if (ph != null && pa != null && ph !== pa) return ph > pa ? homeCode : awayCode;
+      return pred.pred_winner || null;
+    };
 
-    // === PODIO PRONOSTICADO ===
-    let myChampion = null, myRunnerUp = null;
-    if (finalPred.pred_winner && (finalHome || finalAway)) {
-      const wCode = finalPred.pred_winner;
-      myChampion = finalHome?.code === wCode ? finalHome : finalAway;
-      myRunnerUp = finalHome?.code === wCode ? finalAway : finalHome;
-    }
-    let myThirdPlace = null;
-    if (tpPred.pred_winner && (tpHome || tpAway)) {
-      const wCode = tpPred.pred_winner;
-      myThirdPlace = tpHome?.code === wCode ? tpHome : tpAway;
-    }
+    const loserOf = (matchId, homeCode, awayCode) => {
+      const w = winnerOf(matchId, homeCode, awayCode);
+      if (!w) return null;
+      return w === homeCode ? awayCode : homeCode;
+    };
 
-    // === PODIO REAL (resultados del admin) ===
+    const resolveMatch = (matchId) => {
+      const real = matchById[matchId];
+      if (!real) return { home: null, away: null };
+      if (matchId.startsWith('R32')) return { home: real.home_team || null, away: real.away_team || null };
+      if (matchId === 'TP') {
+        const ra = resolveMatch('SF-5'), rb = resolveMatch('SF-6');
+        return { home: real.home_team || loserOf('SF-5', ra.home, ra.away), away: real.away_team || loserOf('SF-6', rb.home, rb.away) };
+      }
+      const pair = QF_PAIRS[matchId] || SF_PAIRS[matchId] || (matchId === 'FINAL' ? ['SF-5','SF-6'] : null);
+      if (!pair) return { home: null, away: null };
+      const [a, b] = pair;
+      const ra = resolveMatch(a), rb = resolveMatch(b);
+      return { home: real.home_team || winnerOf(a, ra.home, ra.away), away: real.away_team || winnerOf(b, rb.home, rb.away) };
+    };
+
+    // Podio pronosticado por el usuario (desde la cascada)
+    const finalRes = resolveMatch('FINAL');
+    const tpRes    = resolveMatch('TP');
+    const myChampCode  = winnerOf('FINAL', finalRes.home, finalRes.away);
+    const myRunUpCode  = loserOf ('FINAL', finalRes.home, finalRes.away);
+    const myThirdCode  = winnerOf('TP',    tpRes.home,    tpRes.away);
+
+    const myChampion   = myChampCode  ? this.teamByCode(myChampCode)  : null;
+    const myRunnerUp   = myRunUpCode  ? this.teamByCode(myRunUpCode)  : null;
+    const myThirdPlace = myThirdCode  ? this.teamByCode(myThirdCode)  : null;
+
+    // Podio real (resultados cargados por el admin)
+    const finalMatch = matchById['FINAL'];
+    const tpMatch    = matchById['TP'];
     let realChampion = null, realRunnerUp = null, realThirdPlace = null;
     if (finalMatch?.winner) {
       realChampion = this.teamByCode(finalMatch.winner);
       const loserCode = finalMatch.winner === finalMatch.home_team ? finalMatch.away_team : finalMatch.home_team;
       realRunnerUp = loserCode ? this.teamByCode(loserCode) : null;
     }
-    if (tpMatch?.winner) {
-      realThirdPlace = this.teamByCode(tpMatch.winner);
-    }
+    if (tpMatch?.winner) realThirdPlace = this.teamByCode(tpMatch.winner);
+
+    // ¿El usuario llegó a pronosticar la final y el 3er puesto?
+    const hasFinalPred = !!myChampion;
+    const hasTPPred    = !!myThirdPlace;
 
     const teamCard = (medal, label, team, hint, isMatch) => team ? `
       <div class="podium-slot">
         <span class="podium-medal">${medal}</span>
         <span class="podium-label">${label}</span>
         <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--color-surface-2);border-radius:var(--radius-md);font-size:15px;font-weight:500;${isMatch ? 'border:1px solid var(--color-success)' : ''}">
-          <span style="font-size:22px">${team.flag || ''}</span><span>${team.name}</span>
+          <span style="font-size:22px">${team.flag || ''}</span>
+          <span>${team.name}</span>
           ${isMatch ? '<span style="margin-left:auto;color:var(--color-success);font-size:18px">✓</span>' : ''}
         </div>
       </div>` : `
@@ -2226,13 +2255,16 @@ const app = {
 
     main.innerHTML = `
       <h2>Podio final</h2>
-      <div class="notice">El podio se determina automáticamente según tus pronósticos de la <strong>Gran Final</strong> y el partido de <strong>Tercer puesto</strong>. Es una vista informativa para comparar tu pronóstico con el resultado real — los puntos se obtienen al acertar esos partidos en la sección Eliminatorias.</div>
+      <div class="notice">Tu podio pronosticado se deriva automáticamente de tu bracket — el campeón, el subcampeón y el tercer lugar que elegiste.</div>
 
       <h3 style="margin-top:24px;margin-bottom:12px;font-size:16px;color:var(--color-primary)">🔮 Tu podio pronosticado</h3>
       <div class="card">
-        ${teamCard('🥇', 'Campeón', myChampion, 'Pronostica la Gran Final en Eliminatorias', myChampion && realChampion && myChampion.code === realChampion.code)}
-        ${teamCard('🥈', 'Subcampeón', myRunnerUp, 'Pronostica la Gran Final en Eliminatorias', myRunnerUp && realRunnerUp && myRunnerUp.code === realRunnerUp.code)}
-        ${teamCard('🥉', 'Tercer lugar', myThirdPlace, 'Pronostica el Tercer puesto en Eliminatorias', myThirdPlace && realThirdPlace && myThirdPlace.code === realThirdPlace.code)}
+        ${teamCard('🥇', 'Campeón', myChampion, 'Completa tu bracket hasta la Gran Final',
+            myChampion && realChampion && myChampion.code === realChampion.code)}
+        ${teamCard('🥈', 'Subcampeón', myRunnerUp, 'Completa tu bracket hasta la Gran Final',
+            myRunnerUp && realRunnerUp && myRunnerUp.code === realRunnerUp.code)}
+        ${teamCard('🥉', 'Tercer lugar', myThirdPlace, 'Completa tu bracket hasta el 3er puesto',
+            myThirdPlace && realThirdPlace && myThirdPlace.code === realThirdPlace.code)}
       </div>
 
       <h3 style="margin-top:24px;margin-bottom:12px;font-size:16px;color:var(--color-primary)">🏆 Podio real</h3>
