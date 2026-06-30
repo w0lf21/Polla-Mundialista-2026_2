@@ -1226,43 +1226,71 @@ const app = {
       const ganador = matches.filter(m => m.category === 'ganador').length;
       const fallos = matches.filter(m => m.category === 'fallo').length;
 
-      const catLabel = { exacto: 'Exacto', 'g+dif': 'G+Dif', ganador: 'Ganador', fallo: 'Fallo' };
       const catClass = { exacto: 'exacto', 'g+dif': 'gdif', ganador: 'ganador', fallo: 'fallo' };
-      const ptsClass = { exacto: 'pbm-pts-5', 'g+dif': 'pbm-pts-3', ganador: 'pbm-pts-2', fallo: 'pbm-pts-0' };
+      const ptsClassByPts = (pts) => pts >= 5 ? 'pbm-pts-5' : pts === 4 ? 'pbm-pts-3' : pts === 3 ? 'pbm-pts-3' : pts === 2 ? 'pbm-pts-2' : 'pbm-pts-0';
 
       const rows = matches.map(m => {
-        const predStr = m.pred_home != null ? `${m.pred_home}-${m.pred_away}` : (m.pred_winner || '—');
-        const realStr = `${m.real_home}-${m.real_away}`;
-        const grpLabel = m.phase === 'groups' ? `Gr.${m.group_name}` : m.phase.toUpperCase();
+        // Resultado real: incluye penales si los hubo
+        let realStr = `${m.real_home}-${m.real_away}`;
+        if (m.had_penalties && m.real_pen_home != null) {
+          realStr += ` <span style="font-size:9px;color:var(--color-text-muted)">pen ${m.real_pen_home}-${m.real_pen_away}</span>`;
+        }
+
+        // Mi pronóstico: marcador + penales si el usuario predijo empate con penales
+        let predStr = m.pred_home != null ? `${m.pred_home}-${m.pred_away}` : (m.pred_winner_name || '—');
+        if (m.had_penalties && m.pred_pen_home != null) {
+          predStr += ` <span style="font-size:9px;color:var(--color-text-muted)">pen ${m.pred_pen_home}-${m.pred_pen_away}</span>`;
+        }
+
+        // Etiqueta del cruce/ronda
+        const grpLabel = m.phase === 'groups' ? `Gr.${m.group_name}` : ({r16:'16avos',qf:'8vos',sf:'SF',final:'Final',tp:'3er'}[m.phase] || m.phase.toUpperCase());
+
+        // Quién avanzó (solo KO): mostrar el equipo real que pasó
+        const advanceInfo = (m.phase !== 'groups' && m.real_winner_name)
+          ? `<div style="font-size:9px;color:var(--color-text-muted);margin-top:2px">→ avanzó ${m.real_winner_name}</div>`
+          : '';
+
+        const label = m.categoryLabel || '';
+
         return `<tr>
           <td style="color:var(--color-text-muted);font-size:10px;white-space:nowrap">${m.match_date?.slice(5,10) || ''}<br><span style="font-size:9px">${grpLabel}</span></td>
           <td style="white-space:nowrap">${m.home_flag} ${m.home_name}</td>
           <td style="text-align:center;font-size:11px;white-space:nowrap">
             <span style="background:var(--color-surface);padding:1px 5px;border-radius:4px;font-weight:600">${realStr}</span>
+            ${advanceInfo}
           </td>
           <td style="white-space:nowrap">${m.away_flag} ${m.away_name}</td>
           <td style="text-align:center;color:var(--color-text-muted)">${predStr}</td>
-          <td style="text-align:center"><span class="pbm-badge ${catClass[m.category]}">${catLabel[m.category]}</span></td>
-          <td style="text-align:right" class="${ptsClass[m.category]}">${m.pts > 0 ? '+' + m.pts : '0'}</td>
+          <td style="text-align:center"><span class="pbm-badge ${catClass[m.category]}" title="${label}" style="font-size:9px">${label || m.category}</span></td>
+          <td style="text-align:right" class="${ptsClassByPts(m.pts)}">${m.pts > 0 ? '+' + m.pts : '0'}</td>
         </tr>`;
       }).join('');
+
+      // Detectar si hay partidos de eliminatorias para mostrar la leyenda de penales
+      const hasKO = matches.some(m => m.phase !== 'groups');
+      const penLegend = hasKO ? `
+        <div style="font-size:10px;color:var(--color-text-muted);margin-top:8px;padding:8px;background:var(--color-surface);border-radius:8px;line-height:1.6">
+          <strong>Eliminatorias con penales:</strong> empate exacto + penales exactos = 8 · empate exacto + ganador = 5 · empate (no exacto) + penales exactos = 5 · empate (no exacto) + quién avanza = 4 · empate (no exacto) sin ganador = 3<br>
+          <strong>Sin penales:</strong> marcador exacto = 5 · ganador + diferencia = 3 · solo ganador = 2
+        </div>` : '';
 
       container.innerHTML = `
         <div class="pbm-summary">
           <div class="pbm-chip total">🏆 Total: ${total} pts</div>
-          <div class="pbm-chip">🎯 Exactos: ${exactos}</div>
-          <div class="pbm-chip">📏 G+Dif: ${gdif}</div>
+          <div class="pbm-chip">🎯 Aciertos altos: ${exactos}</div>
+          <div class="pbm-chip">📏 Parciales: ${gdif}</div>
           <div class="pbm-chip">✅ Ganador: ${ganador}</div>
           <div class="pbm-chip">❌ Fallos: ${fallos}</div>
         </div>
         <table class="pbm-t">
           <thead><tr>
-            <th>Fecha</th><th>Local</th><th style="text-align:center">Resultado</th><th>Visitante</th>
-            <th style="text-align:center">Mi pronóstico</th><th style="text-align:center">Categoría</th>
+            <th>Fecha</th><th>Local</th><th style="text-align:center">Resultado real</th><th>Visitante</th>
+            <th style="text-align:center">Mi pronóstico</th><th style="text-align:center">Cómo puntuó</th>
             <th style="text-align:right">Pts</th>
           </tr></thead>
           <tbody>${rows}</tbody>
-        </table>`;
+        </table>
+        ${penLegend}`;
     } catch(e) {
       container.innerHTML = `<div style="color:var(--color-danger);padding:1rem">⚠️ ${e.message}</div>`;
     }
@@ -1295,10 +1323,24 @@ const app = {
       return pred.pred_winner || null;
     };
 
+    const loserOf = (matchId, homeCode, awayCode) => {
+      const w = winnerOf(matchId, homeCode, awayCode);
+      if (!w || (!homeCode && !awayCode)) return null;
+      return w === homeCode ? awayCode : homeCode;
+    };
+
     const resolveMatch = (matchId) => {
       const real = matchById[matchId];
       if (matchId.startsWith('R32')) return { home: real?.home_team||null, away: real?.away_team||null };
-      const pair = QF_PAIRS[matchId] || SF_PAIRS[matchId] || (['FINAL','TP'].includes(matchId) ? ['SF-5','SF-6'] : null);
+      // 3er puesto: feeders son los PERDEDORES de SF-5 y SF-6
+      if (matchId === 'TP') {
+        const ra = resolveMatch('SF-5'), rb = resolveMatch('SF-6');
+        return {
+          home: real?.home_team || loserOf('SF-5', ra.home, ra.away),
+          away: real?.away_team || loserOf('SF-6', rb.home, rb.away)
+        };
+      }
+      const pair = QF_PAIRS[matchId] || SF_PAIRS[matchId] || (matchId === 'FINAL' ? ['SF-5','SF-6'] : null);
       if (!pair) return { home:null, away:null };
       const [a, b] = pair;
       const ra = resolveMatch(a), rb = resolveMatch(b);
