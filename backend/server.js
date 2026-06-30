@@ -726,8 +726,9 @@ app.get('/api/users/:id/points-breakdown', authMiddleware, (req, res) => {
 
   let matchQuery = `
     SELECT m.id, m.phase, m.group_name, m.home_team, m.away_team,
-           m.home_score, m.away_score, m.match_date, m.match_time,
-           p.pred_home, p.pred_away, p.pred_winner
+           m.home_score, m.away_score, m.pen_home, m.pen_away, m.winner,
+           m.match_date, m.match_time,
+           p.pred_home, p.pred_away, p.pred_winner, p.pred_pen_home, p.pred_pen_away
     FROM matches m
     LEFT JOIN predictions p ON p.match_id = m.id AND p.user_id = ?
     WHERE m.home_score IS NOT NULL AND m.away_score IS NOT NULL`;
@@ -740,27 +741,48 @@ app.get('/api/users/:id/points-breakdown', authMiddleware, (req, res) => {
     db.prepare('SELECT * FROM teams').all().map(t => [t.code, t])
   );
 
+  // Etiqueta descriptiva del caso de puntaje según la tabla de KO
+  const koCategoryLabel = (m, pts) => {
+    const realDraw = m.home_score === m.away_score;
+    if (!realDraw) {
+      // Partido definido en 90 min
+      if (pts === 5) return { cat: 'exacto', label: 'Marcador exacto' };
+      if (pts === 3) return { cat: 'g+dif', label: 'Ganador + diferencia' };
+      if (pts === 2) return { cat: 'ganador', label: 'Solo el ganador' };
+      return { cat: 'fallo', label: 'Sin acierto' };
+    }
+    // Partido con penales
+    if (pts === 8) return { cat: 'exacto', label: 'Empate exacto + penales exactos' };
+    if (pts === 5) return { cat: 'exacto', label: 'Empate + penales/ganador' };
+    if (pts === 4) return { cat: 'g+dif', label: 'Empate + quién avanza' };
+    if (pts === 3) return { cat: 'ganador', label: 'Empate acertado' };
+    if (pts === 2) return { cat: 'ganador', label: 'Solo quién avanza' };
+    return { cat: 'fallo', label: 'Sin acierto' };
+  };
+
   const rows = matches.map(m => {
     let pts = 0;
     let category = null;
+    let categoryLabel = null;
 
     if (m.pred_home != null || m.pred_winner != null) {
       if (m.phase === 'groups') {
         pts = calcGroupMatchPoints(m, m);
-        if (pts === 5) category = 'exacto';
-        else if (pts === 3) category = 'g+dif';
-        else if (pts === 2) category = 'ganador';
-        else category = 'fallo';
+        if (pts === 5) { category = 'exacto'; categoryLabel = (m.home_score === m.away_score) ? 'Empate exacto' : 'Marcador exacto'; }
+        else if (pts === 3) { category = 'g+dif'; categoryLabel = 'Ganador + diferencia'; }
+        else if (pts === 2) { category = 'ganador'; categoryLabel = 'Solo el ganador'; }
+        else { category = 'fallo'; categoryLabel = 'Sin acierto'; }
       } else {
         pts = calcKOMatchPoints(m, m);
-        if (pts >= 5) category = 'exacto';
-        else if (pts === 3) category = 'g+dif';
-        else if (pts === 2) category = 'ganador';
-        else category = 'fallo';
+        const kc = koCategoryLabel(m, pts);
+        category = kc.cat;
+        categoryLabel = kc.label;
       }
     } else {
       category = 'sin_pronostico';
     }
+
+    const realIsDraw = m.home_score === m.away_score;
 
     return {
       match_id: m.id,
@@ -775,10 +797,20 @@ app.get('/api/users/:id/points-breakdown', authMiddleware, (req, res) => {
       away_name: teamMap[m.away_team]?.name || m.away_team,
       real_home: m.home_score,
       real_away: m.away_score,
+      real_pen_home: m.pen_home,
+      real_pen_away: m.pen_away,
+      real_winner: m.winner,
+      real_winner_name: teamMap[m.winner]?.name || m.winner,
       pred_home: m.pred_home,
       pred_away: m.pred_away,
+      pred_winner: m.pred_winner,
+      pred_winner_name: teamMap[m.pred_winner]?.name || m.pred_winner,
+      pred_pen_home: m.pred_pen_home,
+      pred_pen_away: m.pred_pen_away,
+      had_penalties: m.phase !== 'groups' && realIsDraw && m.pen_home != null,
       pts,
-      category
+      category,
+      categoryLabel
     };
   }).filter(r => r.category !== 'sin_pronostico');
 
