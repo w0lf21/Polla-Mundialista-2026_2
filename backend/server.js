@@ -226,41 +226,27 @@ function calcMiniPollaPoints(db, userId, phase) {
     const pred = preds.find(p => p.match_id === m.id);
     if (!pred || pred.pred_home == null || pred.pred_away == null) continue;
 
-    const ph = parseInt(pred.pred_home);
-    const pa = parseInt(pred.pred_away);
-    const rh = m.home_score;
-    const ra = m.away_score;
-
-    // Marcador exacto
-    if (ph === rh && pa === ra) {
-      total += 5; exact++; correct++;
-      // Si hubo penales, verificar penales también
-      if (m.pen_home != null && pred.pred_pen_home != null) {
-        if (parseInt(pred.pred_pen_home) === m.pen_home &&
-            parseInt(pred.pred_pen_away) === m.pen_away) {
-          total += 3; // bonus penales exactos
-        }
-      }
-      continue;
-    }
-
-    // Ganador correcto
-    const predWinner = ph > pa ? 'home' : pa > ph ? 'away' : 'draw';
-    const realWinner = rh > ra ? 'home' : ra > rh ? 'away' : 'draw';
-
-    if (predWinner === realWinner) {
-      correct++;
-      // Diferencia correcta
-      if (Math.abs(ph - pa) === Math.abs(rh - ra)) {
-        total += 3;
-      } else {
-        total += 2;
-      }
-      // Si hubo penales y acertó ganador de penales
-      if (m.winner && pred.pred_winner === m.winner) {
-        total += 1;
-      }
-    }
+    // Usar la misma función de scoring que el resto del sistema (scoring.js)
+    // para garantizar consistencia en la tabla de puntos de eliminatorias.
+    const predObj = {
+      pred_home: pred.pred_home,
+      pred_away: pred.pred_away,
+      pred_winner: pred.pred_winner,
+      pred_pen_home: pred.pred_pen_home,
+      pred_pen_away: pred.pred_pen_away
+    };
+    const realObj = {
+      home_score: m.home_score,
+      away_score: m.away_score,
+      winner: m.winner,
+      pen_home: m.pen_home,
+      pen_away: m.pen_away
+    };
+    const pts = calcKOMatchPoints(predObj, realObj);
+    if (pts === 0) continue;
+    total += pts;
+    correct++;
+    if (pts >= 5) exact++;
   }
 
   return { total, correct, exact };
