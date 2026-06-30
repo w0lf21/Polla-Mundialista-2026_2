@@ -10,10 +10,12 @@ const POINTS = {
   KO_WINNER_DIFF: 3,    // Ganador + diferencia correcta
   KO_WINNER: 2,         // Solo ganador correcto
 
-  // Eliminatorias - con penales
-  KO_EXACT_PEN_ALL: 8,  // Marcador exacto + penales exactos + ganador correcto
-  KO_EXACT_PEN: 5,      // Marcador exacto + penales exactos
-  KO_DRAW_WINNER: 3,    // Empate correcto + ganador correcto en penales
+  // Eliminatorias - con penales (empate en 90 min)
+  KO_EXACT_PEN_ALL: 8,  // Marcador exacto + penales exactos (8 pts)
+  KO_EXACT_PEN: 5,      // (a) Marcador exacto + ganador, penales no exactos
+                         // (b) Marcador NO exacto + penales exactos + ganador
+  KO_DRAW_WINNER: 4,    // Empate no exacto (otro marcador) + ganador correcto
+  CORRECT_DRAW_KO: 3,   // Empate no exacto, sin acertar ganador en penales
 
   // Podio
   CHAMPION: 15,
@@ -104,22 +106,25 @@ function calcKOMatchPoints(pred, real) {
     realPenHome != null && realPenAway != null &&
     predPenHome === realPenHome && predPenAway === realPenAway;
 
-  // Marcador exacto + penales exactos + ganador correcto: 8 pts
-  if (predExact && exactPenales && correctWinner) return POINTS.KO_EXACT_PEN_ALL;
+  // Tabla de puntos para empates en eliminatorias (de mayor a menor):
+  // 1) Marcador exacto + penales exactos              → 8 pts (gana el ganador correcto sí o sí, ya que penales exactos lo implican)
+  // 2) Marcador exacto + penales NO exactos + ganador  → 5 pts
+  // 3) Marcador NO exacto + penales exactos + ganador  → 5 pts
+  // 4) Marcador NO exacto (empate, otro marcador) + ganador → 4 pts
+  // 5) Empate no exacto (sin acertar ganador)           → 3 pts
+  // 6) Nada acertado                                    → 0 pts
 
-  // Marcador exacto + penales exactos (sin importar ganador): 5 pts
-  if (predExact && exactPenales) return POINTS.KO_EXACT_PEN;
+  if (predExact && exactPenales) return POINTS.KO_EXACT_PEN_ALL; // 8 pts
 
-  // Empate correcto (no exacto) + penales exactos + ganador: 5 pts
-  if (predIsDraw && exactPenales && correctWinner) return POINTS.KO_EXACT_PEN;
+  if (predExact && correctWinner) return POINTS.KO_EXACT_PEN; // 5 pts — exacto, ganador, penales no exactos
 
-  // Marcador exacto + ganador correcto en penales: 3 pts
-  if (predExact && correctWinner) return POINTS.KO_DRAW_WINNER;
+  if (predIsDraw && exactPenales && correctWinner) return POINTS.KO_EXACT_PEN; // 5 pts — no exacto, penales exactos, ganador
 
-  // Empate correcto + ganador correcto en penales: 3 pts
-  if (predIsDraw && correctWinner) return POINTS.KO_DRAW_WINNER;
+  if (predIsDraw && correctWinner) return POINTS.KO_DRAW_WINNER; // 4 pts — empate no exacto + ganador
 
-  // Solo ganador correcto: 2 pts
+  if (predIsDraw) return POINTS.CORRECT_DRAW_KO; // 3 pts — empate no exacto, sin acertar ganador
+
+  // Solo ganador correcto (sin haber predicho empate): 2 pts
   if (correctWinner) return POINTS.KO_WINNER;
 
   return 0;
