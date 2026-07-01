@@ -309,6 +309,156 @@ const app = {
 
   // ── FIXTURE ─────────────────────────────────────────────────────────────────
 
+  // Bracket de MI PRONÓSTICO usando las MISMAS clases visuales que el bracket real
+  // (bk-match, pw-bracket, etc.) para que se vea igual, con llaves eliminadas en gris.
+  _buildMyBracketHtml(matchById) {
+    const QF_PAIRS  = { 'QF-1': ['R32-3','R32-5'], 'QF-2': ['R32-1','R32-4'], 'QF-3': ['R32-2','R32-6'], 'QF-4': ['R32-7','R32-8'], 'QF-5': ['R32-11','R32-12'], 'QF-6': ['R32-9','R32-10'], 'QF-7': ['R32-14','R32-16'], 'QF-8': ['R32-13','R32-15'] };
+    const SF_PAIRS  = { 'SF-1': ['QF-1','QF-2'], 'SF-2': ['QF-5','QF-6'], 'SF-3': ['QF-3','QF-4'], 'SF-4': ['QF-7','QF-8'], 'SF-5': ['SF-1','SF-2'], 'SF-6': ['SF-3','SF-4'] };
+    const FINAL_PAIR = ['SF-5','SF-6'];
+    const compSet = this._compensatedSet || new Set();
+
+    const userWinnerOf = (matchId, homeCode, awayCode) => {
+      if (compSet.has(matchId)) {
+        const real = matchById[matchId];
+        if (real && real.winner) return real.winner;
+      }
+      const pred = this.predictions[matchId];
+      if (!pred) return null;
+      const ph = pred.pred_home != null ? parseInt(pred.pred_home) : null;
+      const pa = pred.pred_away != null ? parseInt(pred.pred_away) : null;
+      if (ph != null && pa != null && ph !== pa) return ph > pa ? homeCode : awayCode;
+      return pred.pred_winner || null;
+    };
+    const userLoserOf = (matchId, homeCode, awayCode) => {
+      const w = userWinnerOf(matchId, homeCode, awayCode);
+      if (!w) return null;
+      return w === homeCode ? awayCode : homeCode;
+    };
+
+    const resolved = {};
+    const resolveMatch = (matchId) => {
+      if (resolved[matchId]) return resolved[matchId];
+      let homeCode = null, awayCode = null;
+      if (matchId.startsWith('R32')) {
+        const m = matchById[matchId];
+        homeCode = m?.home_team || null;
+        awayCode = m?.away_team || null;
+      } else if (QF_PAIRS[matchId]) {
+        const [a, b] = QF_PAIRS[matchId];
+        const ra = resolveMatch(a), rb = resolveMatch(b);
+        homeCode = userWinnerOf(a, ra.homeCode, ra.awayCode);
+        awayCode = userWinnerOf(b, rb.homeCode, rb.awayCode);
+      } else if (SF_PAIRS[matchId]) {
+        const [a, b] = SF_PAIRS[matchId];
+        const ra = resolveMatch(a), rb = resolveMatch(b);
+        homeCode = userWinnerOf(a, ra.homeCode, ra.awayCode);
+        awayCode = userWinnerOf(b, rb.homeCode, rb.awayCode);
+      } else if (matchId === 'FINAL') {
+        const [a, b] = FINAL_PAIR;
+        const ra = resolveMatch(a), rb = resolveMatch(b);
+        homeCode = userWinnerOf(a, ra.homeCode, ra.awayCode);
+        awayCode = userWinnerOf(b, rb.homeCode, rb.awayCode);
+      } else if (matchId === 'TP') {
+        const ra = resolveMatch('SF-5'), rb = resolveMatch('SF-6');
+        homeCode = userLoserOf('SF-5', ra.homeCode, ra.awayCode);
+        awayCode = userLoserOf('SF-6', rb.homeCode, rb.awayCode);
+      }
+      resolved[matchId] = { homeCode, awayCode };
+      return resolved[matchId];
+    };
+
+    // Detecta llaves "muertas": ya jugadas en la realidad y el usuario predijo mal,
+    // o dependen de una llave que ya está muerta.
+    const deadCache = {};
+    const isDead = (matchId) => {
+      if (matchId in deadCache) return deadCache[matchId];
+      if (compSet.has(matchId)) return deadCache[matchId] = false; // compensados nunca se marcan muertos
+      const real = matchById[matchId];
+
+      if (matchId.startsWith('R32')) {
+        if (!real || real.home_score == null || !real.winner) return deadCache[matchId] = false;
+        const { homeCode, awayCode } = resolveMatch(matchId);
+        const predW = userWinnerOf(matchId, homeCode, awayCode);
+        return deadCache[matchId] = (!!predW && predW !== real.winner);
+      }
+      if (matchId === 'TP') {
+        if (isDead('SF-5') || isDead('SF-6')) return deadCache[matchId] = true;
+        if (real && real.home_score != null && real.winner) {
+          const { homeCode, awayCode } = resolveMatch(matchId);
+          const predW = userWinnerOf(matchId, homeCode, awayCode);
+          if (predW && predW !== real.winner) return deadCache[matchId] = true;
+        }
+        return deadCache[matchId] = false;
+      }
+      const pair = QF_PAIRS[matchId] || SF_PAIRS[matchId] || (matchId === 'FINAL' ? FINAL_PAIR : null);
+      if (pair && pair.some(p => isDead(p))) return deadCache[matchId] = true;
+      if (real && real.home_score != null && real.winner) {
+        const { homeCode, awayCode } = resolveMatch(matchId);
+        const predW = userWinnerOf(matchId, homeCode, awayCode);
+        if (predW && predW !== real.winner) return deadCache[matchId] = true;
+      }
+      return deadCache[matchId] = false;
+    };
+
+    const myMatchCard = (matchId) => {
+      const { homeCode, awayCode } = resolveMatch(matchId);
+      const home = homeCode ? this.teamByCode(homeCode) : null;
+      const away = awayCode ? this.teamByCode(awayCode) : null;
+      const pred = this.predictions[matchId];
+      const hasPred = !!(pred && (pred.pred_home != null || pred.pred_winner != null));
+      const dead = isDead(matchId);
+
+      const predWinner = homeCode && awayCode ? userWinnerOf(matchId, homeCode, awayCode) : null;
+      const showScore = pred && pred.pred_home != null;
+      const penH = pred && pred.pred_pen_home != null ? `(${pred.pred_pen_home})` : '';
+      const penA = pred && pred.pred_pen_away != null ? `(${pred.pred_pen_away})` : '';
+
+      if (!home && !away) return `<div class="bk-match empty"><div class="bk-team"><span class="bk-name" style="opacity:0.5">Por definir</span></div><div class="bk-team"><span class="bk-name" style="opacity:0.5">Por definir</span></div></div>`;
+
+      return `<div class="bk-match${hasPred ? ' played' : ''}${dead ? ' dead' : ''}">
+        <div class="bk-team ${predWinner && home && predWinner === home.code ? 'winner' : predWinner && home ? 'loser' : ''}">
+          <span class="bk-flag">${home?.flag || '?'}</span>
+          <span class="bk-name">${home?.name || 'Por definir'}</span>
+          ${showScore ? `<span class="bk-score">${pred.pred_home}${penH}</span>` : ''}
+        </div>
+        <div class="bk-team ${predWinner && away && predWinner === away.code ? 'winner' : predWinner && away ? 'loser' : ''}">
+          <span class="bk-flag">${away?.flag || '?'}</span>
+          <span class="bk-name">${away?.name || 'Por definir'}</span>
+          ${showScore ? `<span class="bk-score">${pred.pred_away}${penA}</span>` : ''}
+        </div>
+        ${dead ? `<div style="font-size:9px;color:#f87171;padding:2px 7px;border-top:1px solid rgba(248,113,113,0.2);background:rgba(248,113,113,0.06)">❌ eliminado</div>` : ''}
+      </div>`;
+    };
+
+    const myCol = (matchIds, label) => `
+      <div class="pw-col">
+        <div class="pw-col-label">${label}</div>
+        <div class="pw-col-matches">${matchIds.map(id => myMatchCard(id)).join('')}</div>
+      </div>`;
+
+    return `
+      <div class="pw-bracket">
+        <div class="pw-side pw-left">
+          ${myCol(['R32-3','R32-5','R32-1','R32-4','R32-11','R32-12','R32-9','R32-10'], 'Dieciseisavos')}
+          ${myCol(['QF-1','QF-2','QF-5','QF-6'], 'Octavos')}
+          ${myCol(['SF-1','SF-2'], 'Cuartos')}
+          ${myCol(['SF-5'], 'Semis')}
+        </div>
+        <div class="pw-center">
+          <div class="pw-center-label">Gran Final</div>
+          ${myMatchCard('FINAL')}
+          <div class="pw-center-label" style="margin-top:16px">3er Puesto</div>
+          ${myMatchCard('TP')}
+        </div>
+        <div class="pw-side pw-right">
+          ${myCol(['SF-6'], 'Semis')}
+          ${myCol(['SF-3','SF-4'], 'Cuartos')}
+          ${myCol(['QF-3','QF-4','QF-7','QF-8'], 'Octavos')}
+          ${myCol(['R32-2','R32-6','R32-7','R32-8','R32-14','R32-16','R32-13','R32-15'], 'Dieciseisavos')}
+        </div>
+      </div>`;
+  },
+
   renderFixture(main) {
     this._fixtureTab = this._fixtureTab || this.getActivePhase();
     this._mypredLoaded = false;
@@ -382,51 +532,21 @@ const app = {
       const wc = m.winner;
       const bothDefined = m.home_team && m.away_team;
 
-      // "Mi pred" solo visible en la fase activa actual
-      const isActivePhase = m.phase === activeKOPhase;
-
-      // Mi predicción — solo para la fase activa actual
-      let myPick = null;
-      let myScore = null;
-      let pickResult = '';
-
-      if (isActivePhase) {
-        const pred = myPreds[m.id];
-        if (pred && bothDefined) {
-          const ph = pred.pred_home != null ? parseInt(pred.pred_home) : null;
-          const pa = pred.pred_away != null ? parseInt(pred.pred_away) : null;
-          if (ph != null && pa != null) {
-            if (ph > pa) myPick = m.home_team;
-            else if (pa > ph) myPick = m.away_team;
-            else myPick = pred.pred_winner || null;
-          } else if (pred.pred_winner) {
-            myPick = pred.pred_winner;
-          }
-          myScore = pred.pred_home != null ? `${pred.pred_home}-${pred.pred_away}` : null;
-        }
-        if (hasResult && myPick && wc) {
-          pickResult = myPick === wc ? 'hit' : 'miss';
-        }
-      }
-
       const teamRow = (team, code, scoreVal, penVal, confirmed) => {
         const isRealWinner = wc === code;
-        const isMyPick = myPick === code;
         const cls = isRealWinner ? 'winner' : (hasResult ? 'loser' : '');
         // Equipo aún no confirmado matemáticamente → gris opaco (provisional)
         const provisional = bothDefined && confirmed === false && !hasResult;
-        return `<div class="bk-team ${cls}${isMyPick ? ' mypick' : ''}${provisional ? ' provisional' : ''}">
+        return `<div class="bk-team ${cls}${provisional ? ' provisional' : ''}">
           <span class="bk-flag">${team?.flag || '?'}</span>
           <span class="bk-name">${team?.name || (bothDefined ? '?' : '???')}</span>
-          ${isMyPick ? '<span class="bk-pick-dot" title="Mi pronóstico de ganador">●</span>' : ''}
           ${hasResult ? `<span class="bk-score">${scoreVal}${penVal != null ? `(${penVal})` : ''}</span>` : ''}
         </div>`;
       };
 
-      return `<div class="bk-match${hasResult ? ' played' : ''}${pickResult ? ' pick-'+pickResult : ''}">
+      return `<div class="bk-match${hasResult ? ' played' : ''}">
         ${teamRow(home, m.home_team, m.home_score, m.pen_home, m.home_confirmed)}
         ${teamRow(away, m.away_team, m.away_score, m.pen_away, m.away_confirmed)}
-        ${myScore || myPick ? `<div class="bk-mypred">🎯 Mi pred: ${myScore ? myScore : (myPick ? this.teamByCode(myPick)?.name : '—')}${pickResult === 'hit' ? ' <span style="color:#4ade80">✓</span>' : pickResult === 'miss' ? ' <span style="color:#f87171">✗</span>' : ''}</div>` : ''}
       </div>`;
     };
 
@@ -584,7 +704,7 @@ const app = {
       </div>`;
 
     // Bracket de PRONÓSTICO del usuario (reutiliza la lógica con dead-paths)
-    const myPredBracketHtml = this._renderUserKOBracket(this.predictions || {});
+    const myPredBracketHtml = this._buildMyBracketHtml(matchById);
 
     const bracketDesktopHtml = `
       <div class="pw-bracket">
@@ -692,6 +812,7 @@ const app = {
         .bk-match.played { border-color:rgba(201,168,76,0.35); }
         .bk-match.pick-hit { border-color:rgba(74,222,128,0.5); }
         .bk-match.pick-miss { border-color:rgba(248,113,113,0.4); }
+        .bk-match.dead { opacity:0.4; filter:grayscale(0.8); }
         .bk-match.empty { padding:8px; font-size:11px; color:var(--color-text-muted); font-style:italic; text-align:center; }
         .bk-team { display:flex; align-items:center; gap:5px; padding:4px 7px; font-size:11px; border-bottom:1px solid var(--color-border); }
         .bk-team:last-child { border-bottom:none; }
