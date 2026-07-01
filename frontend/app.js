@@ -1332,22 +1332,59 @@ const app = {
     const resolveMatch = (matchId) => {
       const real = matchById[matchId];
       if (matchId.startsWith('R32')) return { home: real?.home_team||null, away: real?.away_team||null };
-      // 3er puesto: feeders son los PERDEDORES de SF-5 y SF-6
       if (matchId === 'TP') {
         const ra = resolveMatch('SF-5'), rb = resolveMatch('SF-6');
-        return {
-          home: real?.home_team || loserOf('SF-5', ra.home, ra.away),
-          away: real?.away_team || loserOf('SF-6', rb.home, rb.away)
-        };
+        return { home: loserOf('SF-5', ra.home, ra.away), away: loserOf('SF-6', rb.home, rb.away) };
       }
       const pair = QF_PAIRS[matchId] || SF_PAIRS[matchId] || (matchId === 'FINAL' ? ['SF-5','SF-6'] : null);
       if (!pair) return { home:null, away:null };
       const [a, b] = pair;
       const ra = resolveMatch(a), rb = resolveMatch(b);
-      return { home: real?.home_team || winnerOf(a, ra.home, ra.away), away: real?.away_team || winnerOf(b, rb.home, rb.away) };
+      return { home: winnerOf(a, ra.home, ra.away), away: winnerOf(b, rb.home, rb.away) };
+    };
+
+    // ── Detectar llaves eliminadas ────────────────────────────────────────────
+    // Una llave es "muerta" si ya hay resultado real y el usuario predijo el equipo
+    // equivocado, O si alguna llave anterior de la que depende ya está muerta.
+    const deadCache = {};
+    const isDead = (matchId) => {
+      if (matchId in deadCache) return deadCache[matchId];
+      const real = matchById[matchId];
+
+      // R32: muerta si tiene resultado real y el usuario predijo al perdedor
+      if (matchId.startsWith('R32')) {
+        if (!real || real.home_score == null) return deadCache[matchId] = false;
+        const predW = winnerOf(matchId, real.home_team, real.away_team);
+        return deadCache[matchId] = (!!real.winner && predW !== real.winner);
+      }
+
+      // TP: muerta si SF-5 o SF-6 están muertas (usuario predijo mal quien llega)
+      if (matchId === 'TP') {
+        if (isDead('SF-5') || isDead('SF-6')) return deadCache[matchId] = true;
+        if (real && real.home_score != null && real.winner) {
+          const r = resolveMatch(matchId);
+          const predW = winnerOf(matchId, r.home, r.away);
+          if (predW && predW !== real.winner) return deadCache[matchId] = true;
+        }
+        return deadCache[matchId] = false;
+      }
+
+      // QF / SF / FINAL: muerta si algún feeder está muerto
+      const pair = QF_PAIRS[matchId] || SF_PAIRS[matchId] || (matchId === 'FINAL' ? ['SF-5','SF-6'] : null);
+      if (!pair) return deadCache[matchId] = false;
+      if (pair.some(p => isDead(p))) return deadCache[matchId] = true;
+
+      // O si este partido ya tiene resultado y el usuario predijo mal
+      if (real && real.home_score != null && real.winner) {
+        const r = resolveMatch(matchId);
+        const predW = winnerOf(matchId, r.home, r.away);
+        if (predW && predW !== real.winner) return deadCache[matchId] = true;
+      }
+      return deadCache[matchId] = false;
     };
 
     const bkCard = (matchId) => {
+      const dead = isDead(matchId);
       const { home, away } = resolveMatch(matchId);
       const pred = upreds[matchId];
       const ht = home ? this.teamByCode(home) : null;
@@ -1357,10 +1394,17 @@ const app = {
       const winner = winnerOf(matchId, home, away);
       const wt = winner ? this.teamByCode(winner) : null;
       if (!ht && !at) return `<div class="updm-bk empty">Sin definir</div>`;
-      return `<div class="updm-bk">
+
+      const deadStyle = dead ? 'opacity:0.4;filter:grayscale(0.8)' : '';
+      const deadBadge = dead ? `<div style="font-size:9px;color:#f87171;padding:2px 7px;border-top:1px solid rgba(248,113,113,0.2);background:rgba(248,113,113,0.06)">❌ eliminado</div>` : '';
+      const arrowStyle = dead ? 'color:var(--color-text-muted)' : 'color:#C9A84C';
+      const arrowBg = dead ? '' : 'background:rgba(201,168,76,0.06)';
+
+      return `<div class="updm-bk" style="${deadStyle}">
         <div class="updm-team"><span class="updm-flag">${ht?.flag||'?'}</span><span class="updm-name">${ht?.name||'???'}</span>${ph!=null?`<span style="font-weight:700;font-size:12px;margin-left:auto">${ph}</span>`:''}</div>
         <div class="updm-team"><span class="updm-flag">${at?.flag||'?'}</span><span class="updm-name">${at?.name||'???'}</span>${pa!=null?`<span style="font-weight:700;font-size:12px;margin-left:auto">${pa}</span>`:''}</div>
-        ${wt ? `<div style="font-size:10px;color:#C9A84C;padding:2px 7px;border-top:1px solid var(--color-border);background:rgba(201,168,76,0.06)">→ ${wt.flag} ${wt.name}</div>` : ''}
+        ${wt ? `<div style="font-size:10px;${arrowStyle};padding:2px 7px;border-top:1px solid var(--color-border);${arrowBg}">→ ${wt.flag} ${wt.name}</div>` : ''}
+        ${deadBadge}
       </div>`;
     };
 
@@ -2202,13 +2246,14 @@ const app = {
       if (matchId.startsWith('R32')) return { home: real.home_team || null, away: real.away_team || null };
       if (matchId === 'TP') {
         const ra = resolveMatch('SF-5'), rb = resolveMatch('SF-6');
-        return { home: real.home_team || loserOf('SF-5', ra.home, ra.away), away: real.away_team || loserOf('SF-6', rb.home, rb.away) };
+        return { home: loserOf('SF-5', ra.home, ra.away), away: loserOf('SF-6', rb.home, rb.away) };
       }
       const pair = QF_PAIRS[matchId] || SF_PAIRS[matchId] || (matchId === 'FINAL' ? ['SF-5','SF-6'] : null);
       if (!pair) return { home: null, away: null };
       const [a, b] = pair;
       const ra = resolveMatch(a), rb = resolveMatch(b);
-      return { home: real.home_team || winnerOf(a, ra.home, ra.away), away: real.away_team || winnerOf(b, rb.home, rb.away) };
+      // Solo predicciones del usuario — nunca equipos reales propagados
+      return { home: winnerOf(a, ra.home, ra.away), away: winnerOf(b, rb.home, rb.away) };
     };
 
     // Podio pronosticado por el usuario (desde la cascada)
