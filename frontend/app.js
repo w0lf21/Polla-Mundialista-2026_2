@@ -889,15 +889,6 @@ const app = {
           font-style:italic;
         }
         @media(min-width:1200px){ .pw-scroll-hint { display:none; } }
-
-        /* En desktop grande, usa todo el ancho */
-        @media(min-width:1200px){
-          .pw-bracket-wrapper {
-            width: 100vw;
-            margin-left: calc(-1 * (100vw - 100%) / 2);
-            padding: 0 16px;
-          }
-        }
       </style>`;
 
     main.innerHTML = `
