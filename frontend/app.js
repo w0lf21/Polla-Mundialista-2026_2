@@ -703,12 +703,13 @@ const app = {
         </div>
       </div>`;
 
-    // Bracket de PRONÓSTICO del usuario (reutiliza la lógica con dead-paths)
-    const myPredBracketHtml = this._buildMyBracketHtml(matchById);
+    // Bracket de PRONÓSTICO: se construye de forma perezosa (lazy), solo cuando
+    // el usuario hace clic en el toggle por primera vez — evita duplicar el trabajo
+    // pesado de renderizar dos brackets completos en cada carga de Fixture.
+    this._koMatchByIdCache = matchById;
 
     const bracketDesktopHtml = `
       <div class="pw-bracket">
-        <!-- Pathway 1 izquierda -->
         <div class="pw-side pw-left">
           ${col(p1r32, 'Dieciseisavos')}
           ${col(p1r16, 'Octavos')}
@@ -927,7 +928,11 @@ const app = {
               <div class="pw-bracket-wrapper">${bracketDesktopHtml}</div>
             </div>
             <div class="bracket-slide">
-              <div class="pw-bracket-wrapper">${myPredBracketHtml}</div>
+              <div class="pw-bracket-wrapper" id="bracket-pred-wrapper">
+                <div style="padding:40px;text-align:center;color:var(--color-text-muted);font-size:13px">
+                  Cargando tu bracket de pronóstico...
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -963,6 +968,15 @@ const app = {
     // Determinar el nuevo estado
     const goingToPred = forceToPred === true ? true : this._bracketView !== 'pred';
     this._bracketView = goingToPred ? 'pred' : 'real';
+
+    // Construir el bracket de pronóstico solo la primera vez que se necesita (lazy)
+    if (goingToPred) {
+      const predWrapper = document.getElementById('bracket-pred-wrapper');
+      if (predWrapper && !predWrapper.dataset.built) {
+        predWrapper.innerHTML = this._buildMyBracketHtml(this._koMatchByIdCache || {});
+        predWrapper.dataset.built = '1';
+      }
+    }
 
     // Deslizar el track
     track.style.transform = goingToPred ? 'translateX(-50%)' : 'translateX(0)';
