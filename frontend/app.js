@@ -559,16 +559,16 @@ const app = {
     }).join('');
 
     // ── Bracket pathway (afuera → adentro, con scroll horizontal en mobile)
-    // Pathway 1: orden visual alineado con PROPAGATION_MAP (FIFA oficial)
-    // QF-1 ← R32-3, R32-5 | QF-2 ← R32-1, R32-4 | QF-3 ← R32-2, R32-6 | QF-4 ← R32-7, R32-8
-    const p1r32 = ['R32-3','R32-5','R32-1','R32-4','R32-2','R32-6','R32-7','R32-8'].map(id => matchById[id] || null);
-    const p1r16 = ['QF-1','QF-2','QF-3','QF-4'].map(id => matchById[id] || null);
+    // Estructura FIFA oficial:
+    // Lado IZQUIERDO (→SF-5→Final): QF-1,2,5,6 → SF-1,2 → SF-5
+    // Lado DERECHO (→SF-6→Final): QF-3,4,7,8 → SF-3,4 → SF-6
+    const p1r32 = ['R32-3','R32-5','R32-1','R32-4','R32-11','R32-12','R32-9','R32-10'].map(id => matchById[id] || null);
+    const p1r16 = ['QF-1','QF-2','QF-5','QF-6'].map(id => matchById[id] || null);
     const p1qf  = ['SF-1','SF-2'].map(id => matchById[id] || null);
     const p1sf  = matchById['SF-5'] || null;
 
-    // Pathway 2: QF-5 ← R32-11, R32-12 | QF-6 ← R32-9, R32-10 | QF-7 ← R32-14, R32-16 | QF-8 ← R32-13, R32-15
-    const p2r32 = ['R32-11','R32-12','R32-9','R32-10','R32-14','R32-16','R32-13','R32-15'].map(id => matchById[id] || null);
-    const p2r16 = ['QF-5','QF-6','QF-7','QF-8'].map(id => matchById[id] || null);
+    const p2r32 = ['R32-2','R32-6','R32-7','R32-8','R32-14','R32-16','R32-13','R32-15'].map(id => matchById[id] || null);
+    const p2r16 = ['QF-3','QF-4','QF-7','QF-8'].map(id => matchById[id] || null);
     const p2qf  = ['SF-3','SF-4'].map(id => matchById[id] || null);
     const p2sf  = matchById['SF-6'] || null;
 
@@ -582,6 +582,9 @@ const app = {
           ${matches.map(m => matchCard(m)).join('')}
         </div>
       </div>`;
+
+    // Bracket de PRONÓSTICO del usuario (reutiliza la lógica con dead-paths)
+    const myPredBracketHtml = this._renderUserKOBracket(this.predictions || {});
 
     const bracketDesktopHtml = `
       <div class="pw-bracket">
@@ -610,6 +613,31 @@ const app = {
 
     const CSS = `
       <style>
+        /* ── Toggle de bracket real/pronóstico ── */
+        .bracket-toggle-bar { display:flex; justify-content:center; margin-bottom:12px; }
+        .bracket-toggle-btn {
+          display:inline-flex; align-items:center; gap:10px; cursor:pointer;
+          background:var(--color-surface); border:1px solid var(--color-border);
+          border-radius:24px; padding:8px 18px; font-size:13px; font-weight:600;
+          color:var(--color-text); transition:all 0.2s; user-select:none;
+        }
+        .bracket-toggle-btn:hover { border-color:var(--color-primary); background:var(--color-surface-2); }
+        .bracket-toggle-btn .btg-current { color:var(--color-primary); }
+        .bracket-toggle-btn .btg-arrow { color:var(--color-text-muted); font-size:15px; }
+        .bracket-toggle-btn .btg-next { color:var(--color-text-muted); font-size:12px; }
+        .bracket-legend {
+          display:flex; gap:14px; flex-wrap:wrap; align-items:center;
+          font-size:11px; color:var(--color-text-muted); margin-bottom:8px;
+          padding:6px 10px; background:var(--color-surface);
+          border:1px solid var(--color-border); border-radius:8px;
+        }
+        .bracket-slider-viewport { overflow:hidden; width:100%; }
+        .bracket-slider-track {
+          display:flex; width:200%;
+          transition:transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .bracket-slide { width:50%; flex-shrink:0; }
+
         /* ── Subpestañas fixture ── */
         .fixture-tabs { display:flex; gap:4px; margin-bottom:1rem; }
         .fixture-tab {
@@ -762,15 +790,35 @@ const app = {
         <div class="fixture-groups-grid">${groupsHtml}</div>
       </div>
       <div class="fixture-tab-content ${this._fixtureTab === 'finals' ? 'active' : ''}" id="ftab-finals">
-        <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;font-size:11px;color:var(--color-text-muted);margin-bottom:8px;padding:6px 10px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:8px">
+        <div class="bracket-toggle-bar">
+          <button class="bracket-toggle-btn" id="bracket-toggle" onclick="app.toggleBracketView()">
+            <span class="btg-current">🏆 Bracket Real</span>
+            <span class="btg-arrow">⇄</span>
+            <span class="btg-next">🔮 Mi Pronóstico</span>
+          </button>
+        </div>
+        <div class="bracket-legend" id="bracket-legend-real">
           <span style="font-weight:700;color:var(--color-text)">Leyenda:</span>
           <span><span style="display:inline-block;width:8px;height:8px;background:rgba(201,168,76,0.4);border-radius:2px;vertical-align:middle"></span> Ganador real</span>
           <span><span style="color:#60a5fa">● </span>Mi pronóstico</span>
           <span><span style="color:#4ade80">✓</span> Acerté · <span style="color:#f87171">✗</span> Fallé</span>
-          <span style="color:var(--color-text-muted)">??? = sin definir</span>
+        </div>
+        <div class="bracket-legend" id="bracket-legend-pred" style="display:none">
+          <span style="font-weight:700;color:var(--color-text)">Tu bracket:</span>
+          <span>Tal como lo pronosticaste</span>
+          <span><span style="opacity:0.4;filter:grayscale(0.8)">▦</span> <span style="color:#f87171">❌ eliminado</span> = ese camino ya no se puede dar</span>
         </div>
         <div class="pw-scroll-hint">← Desliza horizontalmente para ver el bracket completo →</div>
-        <div class="pw-bracket-wrapper">${bracketDesktopHtml}</div>
+        <div class="bracket-slider-viewport">
+          <div class="bracket-slider-track" id="bracket-slider-track">
+            <div class="bracket-slide">
+              <div class="pw-bracket-wrapper">${bracketDesktopHtml}</div>
+            </div>
+            <div class="bracket-slide">
+              <div class="pw-bracket-wrapper">${myPredBracketHtml}</div>
+            </div>
+          </div>
+        </div>
       </div>
     `;
 
@@ -784,6 +832,43 @@ const app = {
         document.getElementById(`ftab-${this._fixtureTab}`).classList.add('active');
       });
     });
+
+    // Restaurar el modo de bracket si el usuario ya lo había cambiado
+    if (this._bracketView === 'pred') {
+      const track = document.getElementById('bracket-slider-track');
+      if (track) { track.style.transition = 'none'; this.toggleBracketView(true); setTimeout(() => { if (track) track.style.transition = ''; }, 50); }
+    }
+  },
+
+  // Alternar entre bracket real y bracket de pronóstico (slide horizontal)
+  toggleBracketView(forceToPred) {
+    const track = document.getElementById('bracket-slider-track');
+    const btn = document.getElementById('bracket-toggle');
+    const legendReal = document.getElementById('bracket-legend-real');
+    const legendPred = document.getElementById('bracket-legend-pred');
+    if (!track || !btn) return;
+
+    // Determinar el nuevo estado
+    const goingToPred = forceToPred === true ? true : this._bracketView !== 'pred';
+    this._bracketView = goingToPred ? 'pred' : 'real';
+
+    // Deslizar el track
+    track.style.transform = goingToPred ? 'translateX(-50%)' : 'translateX(0)';
+
+    // Actualizar el texto del botón
+    const current = btn.querySelector('.btg-current');
+    const next = btn.querySelector('.btg-next');
+    if (goingToPred) {
+      current.textContent = '🔮 Mi Pronóstico';
+      next.textContent = '🏆 Bracket Real';
+      if (legendReal) legendReal.style.display = 'none';
+      if (legendPred) legendPred.style.display = 'flex';
+    } else {
+      current.textContent = '🏆 Bracket Real';
+      next.textContent = '🔮 Mi Pronóstico';
+      if (legendReal) legendReal.style.display = 'flex';
+      if (legendPred) legendPred.style.display = 'none';
+    }
   },
 
   // ── MI PRONÓSTICO ──────────────────────────────────────────────────────────
@@ -994,8 +1079,8 @@ const app = {
       const myBracketHtml = `
         <div class="pw-bracket">
           <div class="pw-side pw-left">
-            ${myCol(['R32-1','R32-2','R32-3','R32-4','R32-5','R32-6','R32-7','R32-8'], 'Dieciseisavos')}
-            ${myCol(['QF-1','QF-2','QF-3','QF-4'], 'Octavos')}
+            ${myCol(['R32-3','R32-5','R32-1','R32-4','R32-11','R32-12','R32-9','R32-10'], 'Dieciseisavos')}
+            ${myCol(['QF-1','QF-2','QF-5','QF-6'], 'Octavos')}
             ${myCol(['SF-1','SF-2'], 'Cuartos')}
             ${myCol(['SF-5'], 'Semis')}
           </div>
@@ -1008,8 +1093,8 @@ const app = {
           <div class="pw-side pw-right">
             ${myCol(['SF-6'], 'Semis')}
             ${myCol(['SF-3','SF-4'], 'Cuartos')}
-            ${myCol(['QF-5','QF-6','QF-7','QF-8'], 'Octavos')}
-            ${myCol(['R32-9','R32-10','R32-11','R32-12','R32-13','R32-14','R32-15','R32-16'], 'Dieciseisavos')}
+            ${myCol(['QF-3','QF-4','QF-7','QF-8'], 'Octavos')}
+            ${myCol(['R32-2','R32-6','R32-7','R32-8','R32-14','R32-16','R32-13','R32-15'], 'Dieciseisavos')}
           </div>
         </div>`;
 
@@ -1418,8 +1503,8 @@ const app = {
       <div class="updm-bwrap">
         <div class="updm-bracket">
           <div class="updm-side">
-            ${col(['R32-3','R32-5','R32-1','R32-4','R32-2','R32-6','R32-7','R32-8'],'Dieciseisavos')}
-            ${col(['QF-1','QF-2','QF-3','QF-4'],'Octavos')}
+            ${col(['R32-3','R32-5','R32-1','R32-4','R32-11','R32-12','R32-9','R32-10'],'Dieciseisavos')}
+            ${col(['QF-1','QF-2','QF-5','QF-6'],'Octavos')}
             ${col(['SF-1','SF-2'],'Cuartos')}
             ${col(['SF-5'],'Semis')}
           </div>
@@ -1432,8 +1517,8 @@ const app = {
           <div class="updm-side updm-right">
             ${col(['SF-6'],'Semis')}
             ${col(['SF-3','SF-4'],'Cuartos')}
-            ${col(['QF-5','QF-6','QF-7','QF-8'],'Octavos')}
-            ${col(['R32-11','R32-12','R32-9','R32-10','R32-14','R32-16','R32-13','R32-15'],'Dieciseisavos')}
+            ${col(['QF-3','QF-4','QF-7','QF-8'],'Octavos')}
+            ${col(['R32-2','R32-6','R32-7','R32-8','R32-14','R32-16','R32-13','R32-15'],'Dieciseisavos')}
           </div>
         </div>
       </div>`;
@@ -1625,9 +1710,9 @@ const app = {
       };
       const col = (ids, label) => `<div class="updm-col"><div class="updm-clabel">${label}</div><div class="updm-cmatches">${ids.map(card).join('')}</div></div>`;
       const bracketHtml = `<div class="updm-bracket">
-        <div class="updm-side">${col(['R32-1','R32-2','R32-3','R32-4','R32-5','R32-6','R32-7','R32-8'],'Dieciseisavos')}${col(['QF-1','QF-2','QF-3','QF-4'],'Octavos')}${col(['SF-1','SF-2'],'Cuartos')}${col(['SF-5'],'Semis')}</div>
+        <div class="updm-side">${col(['R32-3','R32-5','R32-1','R32-4','R32-11','R32-12','R32-9','R32-10'],'Dieciseisavos')}${col(['QF-1','QF-2','QF-5','QF-6'],'Octavos')}${col(['SF-1','SF-2'],'Cuartos')}${col(['SF-5'],'Semis')}</div>
         <div class="updm-center"><div class="updm-clabel">Gran Final</div>${card('FINAL')}<div class="updm-clabel" style="margin-top:16px">3er Puesto</div>${card('TP')}</div>
-        <div class="updm-side updm-right">${col(['SF-6'],'Semis')}${col(['SF-3','SF-4'],'Cuartos')}${col(['QF-5','QF-6','QF-7','QF-8'],'Octavos')}${col(['R32-9','R32-10','R32-11','R32-12','R32-13','R32-14','R32-15','R32-16'],'Dieciseisavos')}</div>
+        <div class="updm-side updm-right">${col(['SF-6'],'Semis')}${col(['SF-3','SF-4'],'Cuartos')}${col(['QF-3','QF-4','QF-7','QF-8'],'Octavos')}${col(['R32-2','R32-6','R32-7','R32-8','R32-14','R32-16','R32-13','R32-15'],'Dieciseisavos')}</div>
       </div>`;
 
       // Si la Polla 2 sigue abierta, el servidor oculta los picks de eliminatorias de otros
