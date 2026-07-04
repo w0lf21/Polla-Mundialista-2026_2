@@ -1286,12 +1286,16 @@ const app = {
         #compare-modal table.cmp-t th { font-size:10px;color:var(--color-text-muted);font-weight:500;padding:3px 6px;border-bottom:1px solid var(--color-border); }
         #compare-modal table.cmp-t td { padding:4px 6px;border-bottom:1px solid rgba(255,255,255,0.04); }
         #compare-modal table.cmp-t tr:last-child td { border-bottom:none; }
-        #compare-modal .cmp-matches { display:flex; flex-direction:column; gap:4px; }
-        #compare-modal .cmp-match-row { padding:6px 8px; background:var(--color-surface); border:1px solid var(--color-border); border-radius:8px; }
-        #compare-modal .cmp-match-teams { font-size:12px; margin-bottom:4px; }
-        #compare-modal .cmp-match-data { display:flex; align-items:center; gap:10px; flex-wrap:wrap; font-size:11px; }
+        #compare-modal .cmp-matches { display:flex; flex-direction:column; gap:6px; }
+        #compare-modal .cmp-match-row { padding:8px 10px; background:var(--color-surface); border:1px solid var(--color-border); border-radius:8px; }
+        #compare-modal .cmp-match-teams { font-size:12px; margin-bottom:5px; font-weight:500; }
+        #compare-modal .cmp-match-data { display:flex; align-items:center; gap:10px; flex-wrap:wrap; font-size:11px; margin-bottom:6px; }
         #compare-modal .cmp-pred-pair { display:inline-flex; align-items:center; gap:3px; }
-        #compare-modal .cmp-net { margin-left:auto; white-space:nowrap; }
+        #compare-modal .cmp-match-result { display:flex; align-items:center; gap:6px; flex-wrap:wrap; font-size:11px; }
+        #compare-modal .cmp-pill { padding:2px 8px; border-radius:12px; font-weight:700; font-size:11px; white-space:nowrap; }
+        #compare-modal .cmp-pill-me { background:rgba(201,168,76,0.15); color:#C9A84C; border:1px solid rgba(201,168,76,0.3); }
+        #compare-modal .cmp-pill-rival { background:rgba(255,255,255,0.06); color:var(--color-text-muted); border:1px solid var(--color-border); }
+        #compare-modal .cmp-net { margin-left:auto; white-space:nowrap; font-weight:600; }
         @media(max-width:480px){
           #compare-modal .cmp-match-data { gap:8px; }
           #compare-modal .cmp-net { margin-left:0; width:100%; padding-top:2px; }
@@ -1319,27 +1323,35 @@ const app = {
     const container = document.getElementById('compare-content');
     try {
       const data = await this.api(`/users/${rivalId}/compare?phase=${phase||'knockout'}`);
-      const { me, rival, gap, canCatchUp, gold, silver, neutral, totalPending } = data;
+      const { me, rival, gap, canCatchUp, maxGain, gold, silver, neutral, totalPending } = data;
 
       const faseLabel = (data.phase === 'knockout') ? 'eliminatorias' : 'grupos';
       const alertClass = gap <= 0 ? 'good' : canCatchUp ? 'warn' : 'bad';
       const alertMsg = gap <= 0
         ? `🎉 Ya le vas ganando en ${faseLabel} por ${Math.abs(gap)} pts.`
         : canCatchUp
-        ? `⚠️ Te lleva ${gap} pts en ${faseLabel}. Puedes alcanzarlo — máxima ganancia neta posible: ${gold.length * 5 + silver.reduce((s,m) => s+m.net_gain,0)} pts.`
-        : `❌ Te lleva ${gap} pts en ${faseLabel}. Difícil alcanzarlo con los partidos pendientes.`;
+        ? `⚠️ Te lleva ${gap} pts en ${faseLabel}. Puedes alcanzarlo — lo máximo que le puedes sacar de ventaja en los partidos pendientes es ${maxGain} pts.`
+        : `❌ Te lleva ${gap} pts en ${faseLabel}. Aunque aciertes todo lo pendiente, no te alcanza para pasarlo (máximo posible: ${maxGain} pts).`;
 
+      // Fila de un partido: "si tu pronóstico se cumple exacto, así quedarían los puntos"
       const renderTable = (matches, emptyMsg) => {
         if (!matches.length) return `<div style="font-size:12px;color:var(--color-text-muted);padding:6px 0">${emptyMsg}</div>`;
-        return `<div class="cmp-matches">${matches.map(m => `
+        return `<div class="cmp-matches">${matches.map(m => {
+          const netColor = m.net_gain >= 5 ? 'cmp-net-5' : m.net_gain > 0 ? 'cmp-net-pos' : 'cmp-net-0';
+          return `
           <div class="cmp-match-row">
             <div class="cmp-match-teams">${m.home_flag} ${m.home_name} <span style="color:var(--color-text-muted);font-size:10px">vs</span> ${m.away_flag} ${m.away_name}</div>
             <div class="cmp-match-data">
-              <span class="cmp-pred-pair"><span style="color:var(--color-text-muted);font-size:10px">Yo</span> <strong>${m.my_pred}</strong></span>
-              <span class="cmp-pred-pair"><span style="color:var(--color-text-muted);font-size:10px">Él</span> ${m.rival_pred}</span>
-              <span class="cmp-net ${m.net_gain === 5 ? 'cmp-net-5' : m.net_gain > 0 ? 'cmp-net-pos' : 'cmp-net-0'}">+5/+${m.rival_pts} <strong>(+${m.net_gain})</strong></span>
+              <span class="cmp-pred-pair"><span style="color:var(--color-text-muted);font-size:10px">Si aciertas tu</span> <strong>${m.my_pred}</strong></span>
+              <span class="cmp-pred-pair"><span style="color:var(--color-text-muted);font-size:10px">él va con</span> ${m.rival_pred}</span>
             </div>
-          </div>`).join('')}</div>`;
+            <div class="cmp-match-result">
+              <span class="cmp-pill cmp-pill-me">Tú +${m.my_pts}</span>
+              <span class="cmp-pill cmp-pill-rival">Él +${m.rival_pts}</span>
+              <span class="cmp-net ${netColor}">${m.net_gain > 0 ? `→ le sacas ${m.net_gain} pts` : '→ sin diferencia'}</span>
+            </div>
+          </div>`;
+        }).join('')}</div>`;
       };
 
       container.innerHTML = `
@@ -1357,14 +1369,18 @@ const app = {
           </div>
         </div>
         <div class="cmp-alert ${alertClass}">${alertMsg}</div>
-        <div class="cmp-section-title" style="color:#C9A84C">🏆 Partidos de oro — Si sale mi exacto: yo +5, él 0 (${gold.length})</div>
-        ${renderTable(gold, 'No hay partidos donde solo tú sumes 5.')}
-        <div class="cmp-section-title" style="color:#4ade80">📈 Ventaja parcial — Si sale mi exacto: yo +5, él algo menos (${silver.length})</div>
+
+        <div class="cmp-section-title" style="color:#C9A84C">🏆 Le sacas toda la ventaja — si aciertas, él no suma nada ahí (${gold.length})</div>
+        ${renderTable(gold, 'No hay partidos donde le saques toda la ventaja.')}
+
+        <div class="cmp-section-title" style="color:#4ade80">📈 Le sacas ventaja parcial — ambos podrían sumar, pero tú más (${silver.length})</div>
         ${renderTable(silver, 'No hay partidos con ventaja parcial.')}
-        <div class="cmp-section-title" style="color:var(--color-text-muted)">🤝 Pronóstico idéntico — No mueve la brecha (${neutral.length})</div>
-        ${renderTable(neutral, 'Sin pronósticos idénticos.')}
+
+        <div class="cmp-section-title" style="color:var(--color-text-muted)">🤝 Van iguales — si aciertan, no cambia la brecha entre ustedes (${neutral.length})</div>
+        ${renderTable(neutral, 'No tienen pronósticos iguales.')}
+
         <div style="font-size:11px;color:var(--color-text-muted);margin-top:10px;padding-top:8px;border-top:1px solid var(--color-border)">
-          Análisis basado en ${totalPending} partidos pendientes de ${faseLabel}.
+          Análisis basado en ${totalPending} partidos pendientes de ${faseLabel}. Los puntos mostrados son los que otorga cada partido si tu pronóstico se cumple exactamente tal como lo escribiste.
         </div>`;
     } catch(e) {
       container.innerHTML = `<div style="color:var(--color-danger);padding:1rem">⚠️ ${e.message}</div>`;
