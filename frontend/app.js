@@ -3865,6 +3865,29 @@ const app = {
     }
   },
 
+  async downloadBackupDB() {
+    try {
+      const resp = await fetch(`${API}/admin/backup-db`, {
+        headers: { 'Authorization': `Bearer ${this.token}` }
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ error: 'Error desconocido' }));
+        throw new Error(err.error || 'No se pudo descargar el backup');
+      }
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `polla-backup-${new Date().toISOString().slice(0, 10)}.db`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      alert('Error al descargar backup: ' + e.message);
+    }
+  },
+
   async exportUsersXlsx() {
     try {
       // Cargar SheetJS dinámicamente si no está disponible
@@ -4157,7 +4180,10 @@ const app = {
 
       // Botón de descarga xlsx (generado en el frontend con los datos ya cargados)
       const downloadBtn = `
-        <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:10px">
+          <button onclick="app.downloadBackupDB()" style="display:inline-flex;align-items:center;gap:6px;padding:7px 14px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:8px;color:var(--color-text-muted);font-size:12px;font-weight:600;cursor:pointer">
+            🗄️ Descargar Backup DB
+          </button>
           <button onclick="app.exportUsersXlsx()" style="display:inline-flex;align-items:center;gap:6px;padding:7px 14px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:8px;color:var(--color-text-muted);font-size:12px;font-weight:600;cursor:pointer">
             📥 Descargar Excel
           </button>
