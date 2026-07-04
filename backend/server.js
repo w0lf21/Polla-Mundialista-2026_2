@@ -1975,6 +1975,18 @@ app.get('/api/admin/users/export-csv', authMiddleware, adminMiddleware, (req, re
   res.send('\uFEFF' + csv); // BOM para que Excel lo abra bien
 });
 
+// Descargar la base de datos completa (backup) — solo admin
+app.get('/api/admin/backup-db', authMiddleware, adminMiddleware, (req, res) => {
+  const fecha = new Date().toISOString().slice(0, 10);
+  res.setHeader('Content-Type', 'application/octet-stream');
+  res.setHeader('Content-Disposition', `attachment; filename="polla-backup-${fecha}.db"`);
+  res.sendFile(DB_PATH, (err) => {
+    if (err && !res.headersSent) {
+      res.status(500).json({ error: 'No se pudo generar el backup: ' + err.message });
+    }
+  });
+});
+
 app.get('/api/admin/users', authMiddleware, adminMiddleware, (req, res) => {
   const users = db.prepare('SELECT id, username, display_name, is_admin, paid_entry, created_at FROM users ORDER BY created_at DESC').all();
   const result = users.map(u => {
