@@ -851,6 +851,52 @@ app.get('/api/users/:id/compare', authMiddleware, (req, res) => {
   const rivalPoints = calcPhasePoints(rivalId, phase);
   const gap = rivalPoints - myPoints;
 
+  // ── Detección de "camino muerto": para partidos de eliminatorias, calcular
+  // qué equipos PUEDEN llegar a cada llave según los resultados/propagaciones
+  // YA CONFIRMADOS (sin depender de la predicción de nadie). Si la predicción
+  // propia o del rival nombra un equipo que ya es matemáticamente imposible,
+  // ese partido se excluye del comparador (no aplica "si sale mi marcador...").
+  const QF_PAIRS  = { 'QF-1': ['R32-3','R32-5'], 'QF-2': ['R32-1','R32-4'], 'QF-3': ['R32-2','R32-6'], 'QF-4': ['R32-7','R32-8'], 'QF-5': ['R32-11','R32-12'], 'QF-6': ['R32-9','R32-10'], 'QF-7': ['R32-14','R32-16'], 'QF-8': ['R32-13','R32-15'] };
+  const SF_PAIRS  = { 'SF-1': ['QF-1','QF-2'], 'SF-2': ['QF-5','QF-6'], 'SF-3': ['QF-3','QF-4'], 'SF-4': ['QF-7','QF-8'], 'SF-5': ['SF-1','SF-2'], 'SF-6': ['SF-3','SF-4'] };
+  const FINAL_PAIR = ['SF-5','SF-6'];
+
+  let possibleTeamsCache = {};
+  let allKOMatchesById = null;
+  function getPossibleTeams(matchId) {
+    if (possibleTeamsCache[matchId]) return possibleTeamsCache[matchId];
+    if (!allKOMatchesById) {
+      const rows = db.prepare("SELECT id, home_team, away_team FROM matches WHERE phase != 'groups'").all();
+      allKOMatchesById = Object.fromEntries(rows.map(r => [r.id, r]));
+    }
+    const m = allKOMatchesById[matchId];
+    if (matchId.startsWith('R32')) {
+      const s = new Set();
+      if (m?.home_team) s.add(m.home_team);
+      if (m?.away_team) s.add(m.away_team);
+      possibleTeamsCache[matchId] = s;
+      return s;
+    }
+    // Si el partido ya tiene equipos reales propagados, esos son los ÚNICOS posibles
+    if (m?.home_team && m?.away_team) {
+      possibleTeamsCache[matchId] = new Set([m.home_team, m.away_team]);
+      return possibleTeamsCache[matchId];
+    }
+    const pair = QF_PAIRS[matchId] || SF_PAIRS[matchId] || (matchId === 'FINAL' || matchId === 'TP' ? FINAL_PAIR : null);
+    if (!pair) { possibleTeamsCache[matchId] = new Set(); return possibleTeamsCache[matchId]; }
+    const [a, b] = pair;
+    const s = new Set([...getPossibleTeams(a), ...getPossibleTeams(b)]);
+    possibleTeamsCache[matchId] = s;
+    return s;
+  }
+  // Un pronóstico es "imposible" si nombra un equipo fuera del conjunto de posibles
+  function predictedTeamIsImpossible(matchId, pred) {
+    if (!pred) return false;
+    const code = pred.pred_winner;
+    if (!code) return false; // sin equipo explícito, no se puede validar — se deja pasar
+    const possible = getPossibleTeams(matchId);
+    return possible.size > 0 && !possible.has(code);
+  }
+
   // Filtrar partidos pendientes según fase
   const phaseFilter = phase === 'knockout' ? `m.phase != 'groups'` : `m.phase = 'groups'`;
   const pending = db.prepare(`
@@ -868,13 +914,20 @@ app.get('/api/users/:id/compare', authMiddleware, (req, res) => {
     const rivalPred = db.prepare('SELECT pred_home, pred_away, pred_winner FROM predictions WHERE user_id=? AND match_id=?').get(rivalId, m.id);
     if (!myPred || (myPred.pred_home == null && myPred.pred_winner == null)) return null;
 
+    // Excluir partidos donde mi predicción ya es matemáticamente imposible
+    // (nombra un equipo que no puede llegar a esa llave según lo ya confirmado)
+    if (phase === 'knockout' && predictedTeamIsImpossible(m.id, myPred)) return null;
+
     const simH = myPred.pred_home != null ? parseInt(myPred.pred_home) : null;
     const simA = myPred.pred_away != null ? parseInt(myPred.pred_away) : null;
     const myWinner = simH != null && simA != null ? (simH > simA ? m.home_team : simA > simH ? m.away_team : myPred.pred_winner) : myPred.pred_winner;
 
     const myPts = 5;
     let rivalPts = 0;
-    if (rivalPred && (rivalPred.pred_home != null || rivalPred.pred_winner != null)) {
+    // Si la predicción del rival nombra un equipo ya imposible, nunca podría
+    // anotar en ese partido en la realidad — sus puntos hipotéticos quedan en 0.
+    const rivalIsImpossible = phase === 'knockout' && predictedTeamIsImpossible(m.id, rivalPred);
+    if (!rivalIsImpossible && rivalPred && (rivalPred.pred_home != null || rivalPred.pred_winner != null)) {
       const rph = rivalPred.pred_home != null ? parseInt(rivalPred.pred_home) : null;
       const rpa = rivalPred.pred_away != null ? parseInt(rivalPred.pred_away) : null;
       if (rph != null && simH != null) {
