@@ -910,8 +910,8 @@ app.get('/api/users/:id/compare', authMiddleware, (req, res) => {
   const teamMap = Object.fromEntries(db.prepare('SELECT * FROM teams').all().map(t => [t.code, t]));
 
   const analysis = pending.map(m => {
-    const myPred = db.prepare('SELECT pred_home, pred_away, pred_winner FROM predictions WHERE user_id=? AND match_id=?').get(myId, m.id);
-    const rivalPred = db.prepare('SELECT pred_home, pred_away, pred_winner FROM predictions WHERE user_id=? AND match_id=?').get(rivalId, m.id);
+    const myPred = db.prepare('SELECT pred_home, pred_away, pred_winner, pred_pen_home, pred_pen_away FROM predictions WHERE user_id=? AND match_id=?').get(myId, m.id);
+    const rivalPred = db.prepare('SELECT pred_home, pred_away, pred_winner, pred_pen_home, pred_pen_away FROM predictions WHERE user_id=? AND match_id=?').get(rivalId, m.id);
     if (!myPred || (myPred.pred_home == null && myPred.pred_winner == null)) return null;
 
     // Excluir partidos donde mi predicción ya es matemáticamente imposible
@@ -920,25 +920,43 @@ app.get('/api/users/:id/compare', authMiddleware, (req, res) => {
 
     const simH = myPred.pred_home != null ? parseInt(myPred.pred_home) : null;
     const simA = myPred.pred_away != null ? parseInt(myPred.pred_away) : null;
-    const myWinner = simH != null && simA != null ? (simH > simA ? m.home_team : simA > simH ? m.away_team : myPred.pred_winner) : myPred.pred_winner;
+    const myWinner = simH != null && simA != null
+      ? (simH > simA ? m.home_team : simA > simH ? m.away_team : myPred.pred_winner)
+      : myPred.pred_winner;
 
-    const myPts = 5;
-    let rivalPts = 0;
-    // Si la predicción del rival nombra un equipo ya imposible, nunca podría
-    // anotar en ese partido en la realidad — sus puntos hipotéticos quedan en 0.
-    const rivalIsImpossible = phase === 'knockout' && predictedTeamIsImpossible(m.id, rivalPred);
-    if (!rivalIsImpossible && rivalPred && (rivalPred.pred_home != null || rivalPred.pred_winner != null)) {
-      const rph = rivalPred.pred_home != null ? parseInt(rivalPred.pred_home) : null;
-      const rpa = rivalPred.pred_away != null ? parseInt(rivalPred.pred_away) : null;
-      if (rph != null && simH != null) {
-        if (rph === simH && rpa === simA) rivalPts = 5;
-        else {
-          const pr = rph > rpa ? 'H' : rph < rpa ? 'A' : 'D';
-          const rr = simH > simA ? 'H' : simH < simA ? 'A' : 'D';
-          if (pr === rr) rivalPts = Math.abs(rph-rpa) === Math.abs(simH-simA) ? 3 : 2;
+    let myPts, rivalPts;
+
+    if (phase === 'knockout') {
+      // Construir el resultado HIPOTÉTICO: "si mi predicción se cumple exactamente".
+      // Se evalúa a AMBOS (yo y el rival) con la misma función real de puntos
+      // (calcKOMatchPoints) usada en todo el sistema — así se reflejan correctamente
+      // los 8/5/4/3/2 pts según empates, penales y cascada, sin lógica aparte.
+      const isDraw = simH != null && simA != null && simH === simA;
+      const myPenH = myPred.pred_pen_home != null ? parseInt(myPred.pred_pen_home) : null;
+      const myPenA = myPred.pred_pen_away != null ? parseInt(myPred.pred_pen_away) : null;
+      const hypoReal = {
+        home_score: simH, away_score: simA, winner: myWinner,
+        pen_home: isDraw ? myPenH : null, pen_away: isDraw ? myPenA : null
+      };
+      myPts = calcKOMatchPoints(myPred, hypoReal);
+      rivalPts = rivalPred ? calcKOMatchPoints(rivalPred, hypoReal) : 0;
+    } else {
+      // Fase de grupos: mantiene la lógica simple existente
+      myPts = 5;
+      rivalPts = 0;
+      if (rivalPred && (rivalPred.pred_home != null || rivalPred.pred_winner != null)) {
+        const rph = rivalPred.pred_home != null ? parseInt(rivalPred.pred_home) : null;
+        const rpa = rivalPred.pred_away != null ? parseInt(rivalPred.pred_away) : null;
+        if (rph != null && simH != null) {
+          if (rph === simH && rpa === simA) rivalPts = 5;
+          else {
+            const pr = rph > rpa ? 'H' : rph < rpa ? 'A' : 'D';
+            const rr = simH > simA ? 'H' : simH < simA ? 'A' : 'D';
+            if (pr === rr) rivalPts = Math.abs(rph-rpa) === Math.abs(simH-simA) ? 3 : 2;
+          }
+        } else if (myWinner && rivalPred.pred_winner === myWinner) {
+          rivalPts = 2;
         }
-      } else if (myWinner && rivalPred.pred_winner === myWinner) {
-        rivalPts = 2;
       }
     }
 
@@ -954,10 +972,10 @@ app.get('/api/users/:id/compare', authMiddleware, (req, res) => {
     };
   }).filter(Boolean);
 
-  const gold    = analysis.filter(m => m.net_gain === 5);
-  const silver  = analysis.filter(m => m.net_gain > 0 && m.net_gain < 5);
+  const gold    = analysis.filter(m => m.rival_pts === 0 && m.my_pts > 0);
+  const silver  = analysis.filter(m => m.rival_pts > 0 && m.net_gain > 0);
   const neutral = analysis.filter(m => m.net_gain === 0);
-  const maxGain = gold.length * 5 + silver.reduce((s, m) => s + m.net_gain, 0);
+  const maxGain = analysis.reduce((s, m) => s + Math.max(0, m.net_gain), 0);
 
   res.json({
     me: { id: myId, points: myPoints },
