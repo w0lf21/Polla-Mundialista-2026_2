@@ -980,7 +980,7 @@ app.get('/api/users/:id/compare', authMiddleware, (req, res) => {
   res.json({
     me: { id: myId, points: myPoints },
     rival: { id: rivalId, display_name: rivalUser.display_name, points: rivalPoints },
-    gap, canCatchUp: maxGain >= gap, gold, silver, neutral, totalPending: analysis.length,
+    gap, canCatchUp: maxGain >= gap, maxGain, gold, silver, neutral, totalPending: analysis.length,
     phase
   });
 });
