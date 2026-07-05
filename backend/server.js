@@ -5,7 +5,7 @@ const path = require('path');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const Database = require('better-sqlite3');
-const { calcUserTotalPoints, calcDailyBetResults, calcGroupMatchPoints, calcKOMatchPoints } = require('./scoring');
+const { calcUserTotalPoints, calcDailyBetResults, calcGroupMatchPoints, calcKOMatchPoints, getDeadKOMatchIds } = require('./scoring');
 const { calcUserClassified } = require('./classifier');
 const { FIFA_ANNEX_C } = require('./data/annexC');
 
@@ -660,6 +660,10 @@ app.get('/api/leaderboard/knockout', (req, res) => {
       WHERE m.phase != 'groups' AND m.home_score IS NOT NULL
     `).all(u.user_id);
 
+    // Camino muerto: partidos de eliminatorias que no puntúan porque el usuario
+    // rompió su cadena de ganadores en el bracket (ver getDeadKOMatchIds).
+    const deadKO = getDeadKOMatchIds(db, u.user_id);
+
     let total = 0, correct = 0, exact = 0, exactPts = 0, diffCount = 0, diffPts = 0, winnerCount = 0, winnerPts = 0;
     for (const m of matches) {
       // Compensación: exacto=8 solo si predijo ANTES del inicio del partido
@@ -676,6 +680,8 @@ app.get('/api/leaderboard/knockout', (req, res) => {
         else { total += 5; exact++; exactPts += 5; }
         continue;
       }
+      // Camino muerto → 0 puntos (aunque el ganador coincida por casualidad)
+      if (deadKO.has(m.id)) continue;
       const pts = calcKOMatchPoints(m, m);
       if (pts === 0) continue;
       total += pts;
@@ -741,6 +747,10 @@ app.get('/api/users/:id/points-breakdown', authMiddleware, (req, res) => {
     db.prepare('SELECT * FROM teams').all().map(t => [t.code, t])
   );
 
+  // Camino muerto: partidos de eliminatorias que no puntúan porque el usuario
+  // rompió su cadena de ganadores en el bracket.
+  const deadKO = getDeadKOMatchIds(db, targetId);
+
   // Etiqueta descriptiva del caso de puntaje según la tabla de KO
   const koCategoryLabel = (m, pts) => {
     const realDraw = m.home_score === m.away_score;
@@ -772,6 +782,11 @@ app.get('/api/users/:id/points-breakdown', authMiddleware, (req, res) => {
         else if (pts === 3) { category = 'g+dif'; categoryLabel = 'Ganador + diferencia'; }
         else if (pts === 2) { category = 'ganador'; categoryLabel = 'Solo el ganador'; }
         else { category = 'fallo'; categoryLabel = 'Sin acierto'; }
+      } else if (deadKO.has(m.id)) {
+        // Partido en un camino ya eliminado: no puntúa aunque el ganador coincida
+        pts = 0;
+        category = 'fallo';
+        categoryLabel = '❌ Camino eliminado';
       } else {
         pts = calcKOMatchPoints(m, m);
         const kc = koCategoryLabel(m, pts);
@@ -830,7 +845,7 @@ app.get('/api/users/:id/compare', authMiddleware, (req, res) => {
   // Calcular puntos solo de la fase solicitada
   function calcPhasePoints(userId, phaseFilter) {
     const matches = db.prepare(`
-      SELECT m.*, p.pred_home, p.pred_away, p.pred_winner, p.pred_pen_home, p.pred_pen_away
+      SELECT m.*, p.pred_home, p.pred_away, p.pred_winner, p.pred_pen_home, p.pred_pen_away, p.updated_at
       FROM matches m
       LEFT JOIN predictions p ON p.match_id = m.id AND p.user_id = ?
       WHERE m.home_score IS NOT NULL
@@ -838,10 +853,25 @@ app.get('/api/users/:id/compare', authMiddleware, (req, res) => {
     `).all(userId);
     const compRow = db.prepare("SELECT value FROM settings WHERE key='compensated_matches'").get();
     const compensated = new Set(compRow?.value ? compRow.value.split(',').map(s=>s.trim()).filter(Boolean) : []);
+    // Camino muerto (solo aplica a eliminatorias)
+    const deadKO = phaseFilter === 'knockout' ? getDeadKOMatchIds(db, userId) : new Set();
     let total = 0;
     for (const m of matches) {
-      if (compensated.has(m.id)) { total += 5; continue; }
+      // Compensación: 8 si acertó exacto ANTES del inicio, si no 5 (igual que el leaderboard)
+      if (compensated.has(m.id)) {
+        const acertoExacto = m.pred_home != null && m.pred_away != null &&
+          parseInt(m.pred_home) === m.home_score && parseInt(m.pred_away) === m.away_score;
+        let predAntes = true;
+        if (acertoExacto && m.match_date && m.match_time && m.updated_at) {
+          const matchStart = new Date(m.match_date + 'T' + m.match_time + ':00-05:00').getTime();
+          const predTime = new Date(m.updated_at.replace(' ','T')+'Z').getTime();
+          predAntes = predTime <= matchStart;
+        }
+        total += (acertoExacto && predAntes) ? 8 : 5;
+        continue;
+      }
       if (m.pred_home == null && m.pred_winner == null) continue;
+      if (phaseFilter === 'knockout' && deadKO.has(m.id)) continue;
       total += phaseFilter === 'knockout' ? calcKOMatchPoints(m, m) : calcGroupMatchPoints(m, m);
     }
     return total;
@@ -909,14 +939,19 @@ app.get('/api/users/:id/compare', authMiddleware, (req, res) => {
 
   const teamMap = Object.fromEntries(db.prepare('SELECT * FROM teams').all().map(t => [t.code, t]));
 
+  // Camino muerto de cada usuario (solo eliminatorias): un partido pendiente cuyo
+  // camino ya se rompió no puede otorgar puntos, así que se excluye del comparador.
+  const myDeadKO    = phase === 'knockout' ? getDeadKOMatchIds(db, myId)    : new Set();
+  const rivalDeadKO = phase === 'knockout' ? getDeadKOMatchIds(db, rivalId) : new Set();
+
   const analysis = pending.map(m => {
     const myPred = db.prepare('SELECT pred_home, pred_away, pred_winner, pred_pen_home, pred_pen_away FROM predictions WHERE user_id=? AND match_id=?').get(myId, m.id);
     const rivalPred = db.prepare('SELECT pred_home, pred_away, pred_winner, pred_pen_home, pred_pen_away FROM predictions WHERE user_id=? AND match_id=?').get(rivalId, m.id);
     if (!myPred || (myPred.pred_home == null && myPred.pred_winner == null)) return null;
 
-    // Excluir partidos donde mi predicción ya es matemáticamente imposible
-    // (nombra un equipo que no puede llegar a esa llave según lo ya confirmado)
-    if (phase === 'knockout' && predictedTeamIsImpossible(m.id, myPred)) return null;
+    // Excluir partidos donde MI camino ya está roto (no puedo puntuar ahí),
+    // o donde mi predicción nombra un equipo imposible según lo ya confirmado.
+    if (phase === 'knockout' && (myDeadKO.has(m.id) || predictedTeamIsImpossible(m.id, myPred))) return null;
 
     const simH = myPred.pred_home != null ? parseInt(myPred.pred_home) : null;
     const simA = myPred.pred_away != null ? parseInt(myPred.pred_away) : null;
@@ -939,7 +974,9 @@ app.get('/api/users/:id/compare', authMiddleware, (req, res) => {
         pen_home: isDraw ? myPenH : null, pen_away: isDraw ? myPenA : null
       };
       myPts = calcKOMatchPoints(myPred, hypoReal);
-      rivalPts = rivalPred ? calcKOMatchPoints(rivalPred, hypoReal) : 0;
+      // Si el camino del rival ya está roto en este partido, no puede puntuar aquí.
+      const rivalDeadHere = rivalDeadKO.has(m.id) || predictedTeamIsImpossible(m.id, rivalPred);
+      rivalPts = (rivalPred && !rivalDeadHere) ? calcKOMatchPoints(rivalPred, hypoReal) : 0;
     } else {
       // Fase de grupos: mantiene la lógica simple existente
       myPts = 5;
@@ -1009,12 +1046,16 @@ app.get('/api/leaderboard/daily-top', authMiddleware, (req, res) => {
   const users = db.prepare('SELECT id, display_name FROM users WHERE is_admin = 0').all();
 
   const daily = users.map(u => {
+    // Camino muerto del usuario (solo eliminatorias)
+    const deadKO = getDeadKOMatchIds(db, u.id);
     let pts = 0, exactos = 0;
     for (const m of matchesYesterday) {
       const pred = db.prepare(
         'SELECT pred_home, pred_away, pred_winner, pred_pen_home, pred_pen_away FROM predictions WHERE user_id = ? AND match_id = ?'
       ).get(u.id, m.id);
       if (!pred) continue;
+      // Partido de eliminatorias en un camino ya roto → no puntúa
+      if (m.phase !== 'groups' && deadKO.has(m.id)) continue;
       const p = m.phase === 'groups'
         ? calcGroupMatchPoints({ ...pred, home_score: m.home_score, away_score: m.away_score }, { home_score: m.home_score, away_score: m.away_score })
         : calcKOMatchPoints({ ...pred, home_score: m.home_score, away_score: m.away_score, winner: m.winner, pen_home: m.pen_home, pen_away: m.pen_away }, { home_score: m.home_score, away_score: m.away_score, winner: m.winner, pen_home: m.pen_home, pen_away: m.pen_away });
