@@ -2925,6 +2925,71 @@ const app = {
           </div>`;
       };
 
+      // Tarjeta personal + estado del campeonato (solo eliminatorias)
+      const renderMyStanding = (data) => {
+        const lb = data.leaderboard || [];
+        if (!lb.length) return '';
+        const myIdx = lb.findIndex(u => (u.user_id || u.id) === this.user.id);
+        const cs = data.championStatus;
+
+        // Banner de campeonato asegurado (se muestra a todos cuando aplica)
+        let banner = '';
+        if (cs && cs.locked && cs.leaderName) {
+          const first = cs.leaderName.split(' ')[0];
+          banner = `<div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:linear-gradient(135deg,rgba(201,168,76,0.18),rgba(201,168,76,0.06));border:1px solid rgba(201,168,76,0.35);border-radius:10px;margin-bottom:10px">
+            <span style="font-size:20px">🔒</span>
+            <span style="font-size:13px"><strong style="color:#C9A84C">${first}</strong> ya aseguró matemáticamente el <strong>1er lugar</strong> 🏆</span>
+          </div>`;
+        }
+
+        // Si el usuario no está inscrito en eliminatorias, solo el banner
+        if (myIdx < 0) return banner;
+
+        const me = lb[myIdx];
+        const pos = myIdx + 1;
+        const p1 = lb[0]?.points ?? 0;
+        const p2 = lb[1]?.points ?? 0;
+        const p3 = lb[2]?.points ?? 0;
+        const best = me.bestPosition || pos;
+
+        // Mensaje positivo según lo que aún está en juego (Opción A: sin lenguaje negativo)
+        let nudge, nudgeColor;
+        if (best === 1) { nudge = '🔥 Todavía puedes llegar al 1er lugar'; nudgeColor = '#C9A84C'; }
+        else if (best <= 3) { nudge = '💪 Sigues en la pelea por un puesto de premio'; nudgeColor = '#4ade80'; }
+        else { nudge = '🎮 Sigues sumando — juega por escalar posiciones'; nudgeColor = 'var(--color-text-muted)'; }
+
+        const posMedal = pos === 1 ? '🥇' : pos === 2 ? '🥈' : pos === 3 ? '🥉' : `${pos}º`;
+
+        return `${banner}
+          <div style="padding:12px 14px;background:var(--color-surface);border:1px solid rgba(201,168,76,0.25);border-radius:10px;margin-bottom:12px">
+            <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+              <div style="display:flex;align-items:center;gap:14px">
+                <div style="text-align:center">
+                  <div style="font-size:10px;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:0.5px">Tu posición</div>
+                  <div style="font-size:22px;font-weight:800;color:var(--color-primary)">${posMedal}</div>
+                </div>
+                <div style="height:32px;width:1px;background:var(--color-border)"></div>
+                <div>
+                  <div style="font-size:10px;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:0.5px">Tus puntos</div>
+                  <div style="font-size:18px;font-weight:700">${me.points}</div>
+                </div>
+                <div style="height:32px;width:1px;background:var(--color-border)"></div>
+                <div>
+                  <div style="font-size:10px;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:0.5px" title="Lo máximo que podrías sumar si aciertas todo lo que te queda vivo">Tu máximo posible</div>
+                  <div style="font-size:18px;font-weight:700;color:#4ade80">${me.maxPossible}</div>
+                </div>
+              </div>
+              <div style="font-size:12px;font-weight:600;color:${nudgeColor}">${nudge}</div>
+            </div>
+            <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--color-border);display:flex;align-items:center;gap:16px;flex-wrap:wrap;font-size:12px">
+              <span style="color:var(--color-text-muted);font-size:11px">Puestos con premio (puntos hoy):</span>
+              <span>🥇 1º: <strong>${p1}</strong></span>
+              <span>🥈 2º: <strong>${p2}</strong></span>
+              <span>🥉 3º: <strong>${p3}</strong></span>
+            </div>
+          </div>`;
+      };
+
       // Orden de tabs según fase activa — genérico para cualquier torneo
       const tabs = defaultTab === 'knockout'
         ? [['knockout','🏆 Eliminatorias'], ['groups','⚽ Fase de Grupos'], ['today','📅 Apuestas de hoy']]
@@ -2947,6 +3012,7 @@ const app = {
         </div>
         <div id="rank-content-knockout" style="${defaultTab !== 'knockout' ? 'display:none' : ''}">
           ${renderDailyTop(dailyKO, 'knockout')}
+          ${renderMyStanding(lb2)}
           <div class="notice" style="margin-bottom:1rem">Solo participan usuarios con <strong>pago confirmado</strong>.</div>
           ${renderTable(lb2, 'knockout')}
         </div>
@@ -4187,12 +4253,74 @@ const app = {
   async renderAdminUsers() {
     const container = document.getElementById('admin-users');
     try {
-      const [users, bracketData] = await Promise.all([
+      const [users, bracketData, koLb] = await Promise.all([
         this.api('/admin/users'),
-        this.api('/admin/bracket-completion').catch(() => ({ users: [], totalKO: 0 }))
+        this.api('/admin/bracket-completion').catch(() => ({ users: [], totalKO: 0 })),
+        this.api('/leaderboard/knockout').catch(() => null)
       ]);
       const bracketBy = {};
       (bracketData.users || []).forEach(b => { bracketBy[b.user_id] = b; });
+
+      // ── Estado del campeonato (eliminatorias) ──
+      let champSection = '';
+      if (koLb && koLb.leaderboard && koLb.leaderboard.length) {
+        const lb = koLb.leaderboard;
+        const cs = koLb.championStatus || {};
+        const leader = lb[0];
+        // Clasificar por mejor puesto alcanzable
+        const outOfPrizes = lb.filter(u => (u.bestPosition || 1) > 3);
+        const onlyLowerPrize = lb.filter(u => (u.bestPosition || 1) > 1 && (u.bestPosition || 1) <= 3);
+
+        const lockBanner = cs.locked
+          ? `<div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:linear-gradient(135deg,rgba(201,168,76,0.18),rgba(201,168,76,0.06));border:1px solid rgba(201,168,76,0.35);border-radius:8px;margin-bottom:10px">
+               <span style="font-size:20px">🔒</span>
+               <span style="font-size:13px"><strong style="color:#C9A84C">${cs.leaderName}</strong> ya aseguró matemáticamente el <strong>1er lugar</strong> con ${cs.leaderPoints} pts 🏆</span>
+             </div>`
+          : `<div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:8px;margin-bottom:10px">
+               <span style="font-size:18px">🏁</span>
+               <span style="font-size:13px">La pelea por el <strong>1er lugar</strong> sigue abierta. Líder: <strong>${leader.display_name}</strong> (${leader.points} pts, máx rival alcanzable: ${Math.max(...lb.slice(1).map(u=>u.maxPossible), 0)}).</span>
+             </div>`;
+
+        const listItems = lb.map((u, i) => {
+          const pos = i + 1;
+          const best = u.bestPosition || pos;
+          let tag, color;
+          if (best === 1) { tag = 'puede ser 1º'; color = '#C9A84C'; }
+          else if (best <= 3) { tag = `máx ${best}º (premio)`; color = '#4ade80'; }
+          else { tag = `fuera de premios (máx ${best}º)`; color = '#f87171'; }
+          return `<tr style="border-bottom:1px solid var(--color-border)">
+            <td style="padding:4px 8px;color:var(--color-text-muted)">${pos}</td>
+            <td style="padding:4px 8px">${u.display_name}</td>
+            <td style="padding:4px 8px;text-align:right;font-weight:700">${u.points}</td>
+            <td style="padding:4px 8px;text-align:right;color:#4ade80">${u.maxPossible}</td>
+            <td style="padding:4px 8px;text-align:right;color:${color};font-size:11px;font-weight:600">${tag}</td>
+          </tr>`;
+        }).join('');
+
+        champSection = `
+          <div style="margin-bottom:16px;padding:14px;background:var(--color-surface-2);border:1px solid var(--color-border);border-radius:10px">
+            <h3 style="margin:0 0 10px;font-size:15px">🔒 Estado del campeonato · Eliminatorias</h3>
+            ${lockBanner}
+            <div style="font-size:12px;color:var(--color-text-muted);margin-bottom:8px">
+              ${outOfPrizes.length} usuario(s) ya <strong>no pueden alcanzar ningún premio</strong> (ni siquiera acertando todo lo que les queda vivo).
+            </div>
+            <div style="overflow-x:auto">
+              <table style="width:100%;border-collapse:collapse;font-size:12px">
+                <thead><tr style="border-bottom:1px solid var(--color-border);color:var(--color-text-muted)">
+                  <th style="padding:4px 8px;text-align:left">#</th>
+                  <th style="padding:4px 8px;text-align:left">Usuario</th>
+                  <th style="padding:4px 8px;text-align:right">Puntos</th>
+                  <th style="padding:4px 8px;text-align:right" title="Máximo teórico alcanzable">Máx</th>
+                  <th style="padding:4px 8px;text-align:right">Puesto alcanzable</th>
+                </tr></thead>
+                <tbody>${listItems}</tbody>
+              </table>
+            </div>
+            <div style="font-size:10px;color:var(--color-text-muted);margin-top:8px">
+              El "máximo" asume que el usuario acierta el tope de cada partido que aún tiene vivo (8 si predijo empate con penales, 5 si predijo marcador). Los partidos en caminos muertos no suman.
+            </div>
+          </div>`;
+      }
 
       // Botón de descarga xlsx (generado en el frontend con los datos ya cargados)
       const downloadBtn = `
@@ -4205,7 +4333,7 @@ const app = {
           </button>
         </div>`;
 
-      container.innerHTML = downloadBtn + users.map(u => {
+      container.innerHTML = champSection + downloadBtn + users.map(u => {
         const bracket = bracketBy[u.id];
         const bracketChip = bracket
           ? (bracket.complete
