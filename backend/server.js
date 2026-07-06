@@ -652,6 +652,22 @@ app.get('/api/leaderboard/knockout', (req, res) => {
   const compRow = db.prepare("SELECT value FROM settings WHERE key = 'compensated_matches'").get();
   const compensatedSet = new Set(compRow && compRow.value ? compRow.value.split(',').map(s => s.trim()).filter(Boolean) : []);
 
+  // Tope de puntos que puede dar una predicción según lo que el usuario predijo:
+  // empate con penales predichos → 8; marcador (decidido o empate sin penales) → 5;
+  // solo ganador → 2; sin predicción → 0.
+  const ceilingForPrediction = (p) => {
+    if (!p) return 0;
+    const hasScore = p.pred_home != null && p.pred_away != null;
+    if (hasScore) {
+      const isDraw = parseInt(p.pred_home) === parseInt(p.pred_away);
+      const hasPens = p.pred_pen_home != null && p.pred_pen_away != null;
+      if (isDraw && hasPens) return 8;
+      return 5;
+    }
+    if (p.pred_winner) return 2;
+    return 0;
+  };
+
   const leaderboard = regs.map(u => {
     const matches = db.prepare(`
       SELECT m.*, p.pred_home, p.pred_away, p.pred_winner, p.pred_pen_home, p.pred_pen_away, p.updated_at
@@ -690,12 +706,51 @@ app.get('/api/leaderboard/knockout', (req, res) => {
       else if (pts === 3) { diffCount++; diffPts += pts; }
       else if (pts === 2) { winnerCount++; winnerPts += pts; }
     }
-    return { ...u, points: total, correctPredictions: correct, exactScores: exact, exactPts, diffCount, diffPts, winnerCount, winnerPts };
+
+    // Máximo teórico alcanzable: puntos actuales + tope de cada partido PENDIENTE
+    // (aún no jugado) que siga VIVO (no muerto) y que el usuario haya pronosticado.
+    const pendingMatches = db.prepare(`
+      SELECT m.id, p.pred_home, p.pred_away, p.pred_winner, p.pred_pen_home, p.pred_pen_away
+      FROM matches m
+      LEFT JOIN predictions p ON p.match_id = m.id AND p.user_id = ?
+      WHERE m.phase != 'groups' AND m.home_score IS NULL
+    `).all(u.user_id);
+    let maxPossible = total;
+    for (const pm of pendingMatches) {
+      if (deadKO.has(pm.id)) continue; // camino muerto: no puede sumar
+      if (compensatedSet.has(pm.id)) { maxPossible += 8; continue; }
+      maxPossible += ceilingForPrediction(pm);
+    }
+
+    return { ...u, points: total, maxPossible, correctPredictions: correct, exactScores: exact, exactPts, diffCount, diffPts, winnerCount, winnerPts };
   }).sort((a, b) => b.points - a.points || b.exactScores - a.exactScores);
+
+  // ── Estado del campeonato ────────────────────────────────────────────────
+  // Para cada usuario, la MEJOR posición final que aún puede alcanzar es
+  // 1 + (cuántos rivales tienen HOY más puntos que su máximo teórico, es decir,
+  // son inalcanzables para él). Si esa mejor posición es > 3, ya no puede llegar
+  // a ningún puesto con premio.
+  const withStatus = leaderboard.map(u => {
+    const uid = u.user_id;
+    const unbeatable = leaderboard.filter(v => v.user_id !== uid && v.points > u.maxPossible).length;
+    const bestPosition = unbeatable + 1;
+    return { ...u, bestPosition };
+  });
+
+  // El 1er lugar está asegurado matemáticamente si el líder tiene HOY más puntos
+  // que el máximo teórico de todos los demás.
+  const leader = withStatus[0] || null;
+  const championLocked = !!leader && withStatus.slice(1).every(v => v.maxPossible < leader.points);
+  const championStatus = leader ? {
+    locked: championLocked,
+    leaderName: leader.display_name,
+    leaderPoints: leader.points
+  } : { locked: false, leaderName: null, leaderPoints: 0 };
 
   const totalPot = regs.length * netFee;
   res.json({
-    leaderboard,
+    leaderboard: withStatus,
+    championStatus,
     totalPot,
     prizes: { first: totalPot * split1, second: totalPot * split2, third: totalPot * split3 },
     splits: { first: Math.round(split1*100), second: Math.round(split2*100), third: Math.round(split3*100) },
