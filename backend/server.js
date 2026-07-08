@@ -881,17 +881,27 @@ app.get('/api/leaderboard/knockout', (req, res) => {
     return world;
   }
 
-  // Para cada usuario: ¿en su propio mejor mundo posible, queda 1º (solo o empatado)?
+  // Para cada usuario: en su propio mejor mundo posible (todos sus partidos vivos
+  // acertados), ¿en qué puesto queda al recalcular a TODOS los demás en ese mismo
+  // escenario compartido? Ese es el MEJOR puesto final que puede aspirar a lograr
+  // — un cálculo riguroso (prueba de existencia), no una estimación.
   const contenders = [];
+  const bestPositionById = {};
   for (const u of regs) {
     const world = buildWorldFor(u.user_id);
     const scores = regs.map(v => ({ uid: v.user_id, pts: scoreUserInWorld(v.user_id, world) }));
-    const topPts = Math.max(...scores.map(s => s.pts));
     const myPts = scores.find(s => s.uid === u.user_id).pts;
-    if (myPts === topPts) contenders.push(u.user_id);
+    // Puesto = 1 + cuántos rivales quedan ESTRICTAMENTE por encima en ese mundo
+    // (empates comparten el mismo puesto, como en una tabla deportiva normal).
+    const above = scores.filter(s => s.uid !== u.user_id && s.pts > myPts).length;
+    bestPositionById[u.user_id] = above + 1;
+    if (above === 0) contenders.push(u.user_id);
   }
-  const contenderSet = new Set(contenders);
-  const withStatus = leaderboard.map(u => ({ ...u, canBeChampion: contenderSet.has(u.user_id) }));
+  const withStatus = leaderboard.map(u => ({
+    ...u,
+    canBeChampion: bestPositionById[u.user_id] === 1,
+    bestPossiblePosition: bestPositionById[u.user_id]
+  }));
 
   const leader = withStatus[0] || null;
   // El título está definido si SOLO una persona conserva un camino real al 1er lugar.
