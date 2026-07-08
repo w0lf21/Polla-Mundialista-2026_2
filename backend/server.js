@@ -2246,4 +2246,197 @@ app.put('/api/admin/podium', authMiddleware, adminMiddleware, (req, res) => {
     VALUES (1, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       first_place = excluded.first_place,
-  
+      second_place = excluded.second_place,
+      third_place = excluded.third_place
+  `).run(first_place || null, second_place || null, third_place || null);
+  res.json({ success: true });
+});
+
+// Exportar reporte CSV de usuarios con pagos y estado del bracket
+app.get('/api/admin/users/export-csv', authMiddleware, adminMiddleware, (req, res) => {
+  const users = db.prepare(`
+    SELECT u.id, u.display_name, u.username,
+           MAX(CASE WHEN r.polla='groups'   AND r.paid=1 THEN 1 ELSE 0 END) as paid_groups,
+           MAX(CASE WHEN r.polla='knockout' AND r.paid=1 THEN 1 ELSE 0 END) as paid_knockout
+    FROM users u
+    LEFT JOIN polla_registrations r ON r.user_id = u.id
+    WHERE u.is_admin = 0
+    GROUP BY u.id
+    ORDER BY u.display_name
+  `).all();
+
+  const koMatches = db.prepare("SELECT id FROM matches WHERE phase != 'groups'").all();
+  const totalKO = koMatches.length;
+
+  const rows = users.map(u => {
+    const filled = db.prepare(`
+      SELECT COUNT(DISTINCT p.match_id) as c
+      FROM predictions p
+      JOIN matches m ON m.id = p.match_id
+      WHERE p.user_id = ? AND m.phase != 'groups'
+        AND (p.pred_home IS NOT NULL OR p.pred_winner IS NOT NULL)
+    `).get(u.id).c;
+
+    const ptsGroups   = calcUserTotalPoints ? null : null; // solo scoring de grupos si se quiere
+    const complete    = filled >= totalKO;
+
+    // Escapar campos para CSV
+    const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+
+    return [
+      esc(u.display_name),
+      esc(u.username),
+      esc(u.paid_groups  ? 'Sí' : 'No'),
+      esc(u.paid_knockout ? 'Sí' : 'No'),
+      esc(`${filled}/${totalKO}`),
+      esc(complete ? 'Completo' : 'Incompleto')
+    ].join(',');
+  });
+
+  const header = '"Nombre","Usuario","Pagó Grupos","Pagó Eliminatorias","Bracket KO","Estado Bracket"';
+  const csv = [header, ...rows].join('\r\n');
+
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="polla-usuarios.csv"');
+  res.send('\uFEFF' + csv); // BOM para que Excel lo abra bien
+});
+
+// Descargar la base de datos completa (backup) — solo admin
+app.get('/api/admin/backup-db', authMiddleware, adminMiddleware, (req, res) => {
+  const fecha = new Date().toISOString().slice(0, 10);
+  res.setHeader('Content-Type', 'application/octet-stream');
+  res.setHeader('Content-Disposition', `attachment; filename="polla-backup-${fecha}.db"`);
+  res.sendFile(DB_PATH, (err) => {
+    if (err && !res.headersSent) {
+      res.status(500).json({ error: 'No se pudo generar el backup: ' + err.message });
+    }
+  });
+});
+
+app.get('/api/admin/users', authMiddleware, adminMiddleware, (req, res) => {
+  const users = db.prepare('SELECT id, username, display_name, is_admin, paid_entry, created_at FROM users ORDER BY created_at DESC').all();
+  const result = users.map(u => {
+    const r1 = db.prepare("SELECT paid FROM polla_registrations WHERE user_id = ? AND polla = 'groups'").get(u.id);
+    const r2 = db.prepare("SELECT paid FROM polla_registrations WHERE user_id = ? AND polla = 'knockout'").get(u.id);
+    return {
+      ...u,
+      paid_groups: r1 ? !!r1.paid : false,
+      paid_knockout: r2 ? !!r2.paid : false
+    };
+  });
+  res.json(result);
+});
+
+app.put('/api/admin/users/:id', authMiddleware, adminMiddleware, (req, res) => {
+  const { display_name, username, is_admin, paid_entry } = req.body || {};
+  if (username) {
+    const clash = db.prepare('SELECT id FROM users WHERE username = ? AND id != ?').get(username.toLowerCase(), req.params.id);
+    if (clash) return res.status(409).json({ error: 'Ese usuario ya existe' });
+  }
+  db.prepare(`
+    UPDATE users SET
+      display_name = COALESCE(?, display_name),
+      username     = COALESCE(?, username),
+      is_admin     = COALESCE(?, is_admin),
+      paid_entry   = COALESCE(?, paid_entry)
+    WHERE id = ?
+  `).run(
+    display_name ?? null,
+    username ? username.toLowerCase() : null,
+    is_admin != null ? (is_admin ? 1 : 0) : null,
+    paid_entry != null ? (paid_entry ? 1 : 0) : null,
+    req.params.id
+  );
+  res.json({ success: true });
+});
+
+// Confirmar pago de polla por usuario (desde panel de usuarios)
+app.put('/api/admin/users/:id/polla/:polla/paid', authMiddleware, adminMiddleware, (req, res) => {
+  const { id, polla } = req.params;
+  const { paid } = req.body || {};
+  if (!['groups', 'knockout'].includes(polla))
+    return res.status(400).json({ error: 'Polla inválida' });
+
+  // Upsert en polla_registrations
+  db.prepare(`
+    INSERT INTO polla_registrations (user_id, polla, paid)
+    VALUES (?, ?, ?)
+    ON CONFLICT(user_id, polla) DO UPDATE SET paid = excluded.paid
+  `).run(id, polla, paid ? 1 : 0);
+
+  // También actualizar paid_entry general si se confirma cualquier polla
+  if (paid) {
+    db.prepare('UPDATE users SET paid_entry = 1 WHERE id = ?').run(id);
+  } else {
+    // Si se quita ambas pollas, quitar paid_entry general
+    const r1 = db.prepare("SELECT paid FROM polla_registrations WHERE user_id = ? AND polla = 'groups'").get(id);
+    const r2 = db.prepare("SELECT paid FROM polla_registrations WHERE user_id = ? AND polla = 'knockout'").get(id);
+    if (!r1?.paid && !r2?.paid) {
+      db.prepare('UPDATE users SET paid_entry = 0 WHERE id = ?').run(id);
+    }
+  }
+
+  res.json({ success: true });
+});
+
+app.post('/api/admin/users/:id/reset-password', authMiddleware, adminMiddleware, (req, res) => {
+  const { password } = req.body || {};
+  if (!password || password.length < 4) return res.status(400).json({ error: 'Contrasena muy corta' });
+  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(bcrypt.hashSync(password, 10), req.params.id);
+  res.json({ success: true });
+});
+
+app.delete('/api/admin/users/:id', authMiddleware, adminMiddleware, (req, res) => {
+  if (parseInt(req.params.id) === req.user.id)
+    return res.status(400).json({ error: 'No puedes eliminarte a ti mismo' });
+  db.prepare('DELETE FROM users WHERE id = ?').run(req.params.id);
+  res.json({ success: true });
+});
+
+app.get('/api/settings', (req, res) => {
+  res.json(Object.fromEntries(db.prepare('SELECT * FROM settings').all().map(r => [r.key, r.value])));
+});
+
+// Admin: marcar pago de mini-polla
+app.put('/api/admin/mini-polla/:phase/users/:userId/paid', authMiddleware, adminMiddleware, (req, res) => {
+  const { phase, userId } = req.params;
+  const { paid } = req.body || {};
+  db.prepare(
+    'UPDATE mini_polla_registrations SET paid = ? WHERE user_id = ? AND phase = ?'
+  ).run(paid ? 1 : 0, userId, phase);
+  res.json({ success: true });
+});
+
+// Admin: editar montos de mini-pollas
+app.put('/api/admin/mini-polla/fees', authMiddleware, adminMiddleware, (req, res) => {
+  const { fee_r16, fee_qf, fee_sf_qf, fee_sf_sf } = req.body || {};
+  if (fee_r16)   db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('mini_polla_fee_r16',   String(fee_r16));
+  if (fee_qf)    db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('mini_polla_fee_qf',    String(fee_qf));
+  if (fee_sf_qf) db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('mini_polla_fee_sf_qf', String(fee_sf_qf));
+  if (fee_sf_sf) db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('mini_polla_fee_sf_sf', String(fee_sf_sf));
+  res.json({ success: true });
+});
+
+// ENDPOINT TEMPORAL DE PRUEBA — ELIMINAR DESPUÉS
+app.get('/api/admin/set-test-date', authMiddleware, adminMiddleware, (req, res) => {
+  const now = new Date();
+  const local = new Date(now.getTime() + (-5 * 60 - now.getTimezoneOffset()) * 60000);
+  const today = local.toISOString().split('T')[0];
+  db.prepare("UPDATE matches SET match_date = ?, match_time = '14:00' WHERE id = 'G-A-1'").run(today);
+  res.json({ success: true, today });
+});
+
+app.get('/api/admin/restore-test-date', authMiddleware, adminMiddleware, (req, res) => {
+  db.prepare("UPDATE matches SET match_date = '2026-06-11', match_time = '14:00' WHERE id = 'G-A-1'").run();
+  res.json({ success: true });
+});
+
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api')) return next();
+  res.sendFile(path.join(__dirname, '..', 'frontend', 'index.html'));
+});
+
+app.listen(PORT, () => {
+  console.log(`Servidor en puerto ${PORT}`);
+  console.log(`Predicciones bloqueadas: ${areGroupPredictionsLocked()}`);
+});
