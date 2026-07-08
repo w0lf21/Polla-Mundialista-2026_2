@@ -725,27 +725,186 @@ app.get('/api/leaderboard/knockout', (req, res) => {
     return { ...u, points: total, maxPossible, correctPredictions: correct, exactScores: exact, exactPts, diffCount, diffPts, winnerCount, winnerPts };
   }).sort((a, b) => b.points - a.points || b.exactScores - a.exactScores);
 
-  // ── Estado del campeonato ────────────────────────────────────────────────
-  // Para cada usuario, la MEJOR posición final que aún puede alcanzar es
-  // 1 + (cuántos rivales tienen HOY más puntos que su máximo teórico, es decir,
-  // son inalcanzables para él). Si esa mejor posición es > 3, ya no puede llegar
-  // a ningún puesto con premio.
-  const withStatus = leaderboard.map(u => {
-    const uid = u.user_id;
-    const unbeatable = leaderboard.filter(v => v.user_id !== uid && v.points > u.maxPossible).length;
-    const bestPosition = unbeatable + 1;
-    return { ...u, bestPosition };
-  });
+  // ── Estado del campeonato (riguroso) ─────────────────────────────────────
+  // Para cada usuario U, se construye EL escenario futuro que maximiza su
+  // propio puntaje (cada partido pendiente resuelto exactamente como U lo
+  // predijo). Es la ÚNICA asignación que le da a U el 100% de su techo en
+  // TODOS los partidos vivos a la vez. En ESE mismo mundo (fijo y coherente)
+  // se recalcula el puntaje de TODOS los demás usuarios con sus propias
+  // predicciones reales — así, si un rival predijo lo mismo que U en varios
+  // partidos, también sube en ese mundo (no se queda "congelado"). Los
+  // caminos muertos se vuelven a evaluar dentro de ese mundo hipotético.
+  // Si, en su propio mejor mundo, U termina arriba de todos (o empatado en
+  // el 1er lugar), existe al menos un futuro real donde U es 1º → SÍ puede
+  // ser campeón. Si ni en su mejor caso alcanza, no hay forma de que sea 1º.
+  const koQfPairs  = { 'QF-1':['R32-3','R32-5'], 'QF-2':['R32-1','R32-4'], 'QF-3':['R32-2','R32-6'], 'QF-4':['R32-7','R32-8'], 'QF-5':['R32-11','R32-12'], 'QF-6':['R32-9','R32-10'], 'QF-7':['R32-14','R32-16'], 'QF-8':['R32-13','R32-15'] };
+  const koSfPairs  = { 'SF-1':['QF-1','QF-2'], 'SF-2':['QF-5','QF-6'], 'SF-3':['QF-3','QF-4'], 'SF-4':['QF-7','QF-8'], 'SF-5':['SF-1','SF-2'], 'SF-6':['SF-3','SF-4'] };
+  const koFinalPair = ['SF-5','SF-6'];
 
-  // El 1er lugar está asegurado matemáticamente si el líder tiene HOY más puntos
-  // que el máximo teórico de todos los demás.
+  const allKOMatches = db.prepare("SELECT * FROM matches WHERE phase != 'groups'").all();
+  const baseMatchById = Object.fromEntries(allKOMatches.map(m => [m.id, { ...m }]));
+  const predsByUser = {};
+  for (const u of regs) {
+    const rows = db.prepare('SELECT * FROM predictions WHERE user_id = ?').all(u.user_id);
+    predsByUser[u.user_id] = Object.fromEntries(rows.map(p => [p.match_id, p]));
+  }
+
+  // Puntúa a un usuario contra un "mundo" (real + hipotético) dado, replicando
+  // exactamente la tabla de puntos y la cascada de caminos muertos.
+  function scoreUserInWorld(uid, matchById) {
+    const preds = predsByUser[uid] || {};
+    const userWinnerOf = (matchId, homeCode, awayCode) => {
+      if (compensatedSet.has(matchId)) { const real = matchById[matchId]; if (real && real.winner) return real.winner; }
+      const pred = preds[matchId];
+      if (!pred) return null;
+      const ph = pred.pred_home != null ? parseInt(pred.pred_home) : null;
+      const pa = pred.pred_away != null ? parseInt(pred.pred_away) : null;
+      if (ph != null && pa != null && ph !== pa) return ph > pa ? homeCode : awayCode;
+      return pred.pred_winner || null;
+    };
+    const resolved = {};
+    const resolveMatch = (matchId) => {
+      if (resolved[matchId]) return resolved[matchId];
+      let homeCode = null, awayCode = null;
+      const real = matchById[matchId];
+      if (matchId.startsWith('R32')) { homeCode = real?.home_team || null; awayCode = real?.away_team || null; }
+      else if (matchId === 'TP') {
+        const ra = resolveMatch('SF-5'), rb = resolveMatch('SF-6');
+        const wa = userWinnerOf('SF-5', ra.homeCode, ra.awayCode), wb = userWinnerOf('SF-6', rb.homeCode, rb.awayCode);
+        homeCode = wa === ra.homeCode ? ra.awayCode : ra.homeCode;
+        awayCode = wb === rb.homeCode ? rb.awayCode : rb.homeCode;
+      } else {
+        const pair = koQfPairs[matchId] || koSfPairs[matchId] || (matchId === 'FINAL' ? koFinalPair : null);
+        if (pair) { const [a,b] = pair; const ra = resolveMatch(a), rb = resolveMatch(b); homeCode = userWinnerOf(a, ra.homeCode, ra.awayCode); awayCode = userWinnerOf(b, rb.homeCode, rb.awayCode); }
+      }
+      resolved[matchId] = { homeCode, awayCode };
+      return resolved[matchId];
+    };
+    const deadCache = {};
+    const isDead = (matchId) => {
+      if (matchId in deadCache) return deadCache[matchId];
+      if (compensatedSet.has(matchId)) return deadCache[matchId] = false;
+      const real = matchById[matchId];
+      if (matchId.startsWith('R32')) {
+        if (!real || real.home_score == null || !real.winner) return deadCache[matchId] = false;
+        const { homeCode, awayCode } = resolveMatch(matchId);
+        const predW = userWinnerOf(matchId, homeCode, awayCode);
+        return deadCache[matchId] = (!!predW && predW !== real.winner);
+      }
+      if (matchId === 'TP') {
+        if (isDead('SF-5') || isDead('SF-6')) return deadCache[matchId] = true;
+        if (real && real.home_score != null && real.winner) { const { homeCode, awayCode } = resolveMatch(matchId); const predW = userWinnerOf(matchId, homeCode, awayCode); if (predW && predW !== real.winner) return deadCache[matchId] = true; }
+        return deadCache[matchId] = false;
+      }
+      const pair = koQfPairs[matchId] || koSfPairs[matchId] || (matchId === 'FINAL' ? koFinalPair : null);
+      if (pair && pair.some(p => isDead(p))) return deadCache[matchId] = true;
+      if (real && real.home_score != null && real.winner) { const { homeCode, awayCode } = resolveMatch(matchId); const predW = userWinnerOf(matchId, homeCode, awayCode); if (predW && predW !== real.winner) return deadCache[matchId] = true; }
+      return deadCache[matchId] = false;
+    };
+    let total = 0;
+    for (const mid of Object.keys(matchById)) {
+      const real = matchById[mid];
+      if (real.home_score == null) continue;
+      if (compensatedSet.has(mid)) {
+        const pred = preds[mid];
+        const ae = pred && pred.pred_home != null && parseInt(pred.pred_home) === real.home_score && parseInt(pred.pred_away) === real.away_score;
+        total += ae ? 8 : 5;
+        continue;
+      }
+      if (isDead(mid)) continue;
+      const pred = preds[mid];
+      if (!pred || (pred.pred_home == null && pred.pred_winner == null)) continue;
+      total += calcKOMatchPoints(pred, real);
+    }
+    return total;
+  }
+
+  // Construye el mundo que maximiza el puntaje propio de `uid`: cada partido
+  // pendiente se resuelve exactamente como `uid` lo predijo (única asignación
+  // que le da su techo completo en todos los partidos vivos simultáneamente).
+  function buildWorldFor(uid) {
+    const world = {};
+    for (const [mid, m] of Object.entries(baseMatchById)) world[mid] = { ...m };
+    const preds = predsByUser[uid] || {};
+    const order = ['QF-1','QF-2','QF-3','QF-4','QF-5','QF-6','QF-7','QF-8','SF-1','SF-2','SF-3','SF-4','SF-5','SF-6','TP','FINAL'];
+    const winnerCache = {};
+    const getWinnerCode = (mid) => {
+      if (winnerCache[mid]) return winnerCache[mid];
+      const real = baseMatchById[mid];
+      if (real.home_score != null) { winnerCache[mid] = real.winner; return real.winner; }
+      const pred = preds[mid];
+      const home = world[mid].home_team, away = world[mid].away_team;
+      let winner = null;
+      if (pred) {
+        const ph = pred.pred_home != null ? parseInt(pred.pred_home) : null, pa = pred.pred_away != null ? parseInt(pred.pred_away) : null;
+        if (ph != null && pa != null && ph !== pa) winner = ph > pa ? home : away;
+        else winner = pred.pred_winner || null;
+      }
+      winnerCache[mid] = winner;
+      return winner;
+    };
+    for (const mid of order) {
+      const real = baseMatchById[mid];
+      if (real.home_score != null) continue;
+      let home = world[mid].home_team, away = world[mid].away_team;
+      if (!home || !away) {
+        let feeders = mid === 'TP' ? ['SF-5','SF-6'] : (koQfPairs[mid] || koSfPairs[mid] || (mid === 'FINAL' ? koFinalPair : null));
+        if (feeders) {
+          const [a, b] = feeders;
+          const wa = getWinnerCode(a), wb = getWinnerCode(b);
+          if (mid === 'TP') {
+            const la = wa === world[a].home_team ? world[a].away_team : world[a].home_team;
+            const lb = wb === world[b].home_team ? world[b].away_team : world[b].home_team;
+            home = home || la; away = away || lb;
+          } else { home = home || wa; away = away || wb; }
+          world[mid].home_team = home; world[mid].away_team = away;
+        }
+      }
+      const pred = preds[mid];
+      if (pred && (pred.pred_home != null || pred.pred_winner != null)) {
+        const ph = pred.pred_home != null ? parseInt(pred.pred_home) : null, pa = pred.pred_away != null ? parseInt(pred.pred_away) : null;
+        let winner;
+        if (ph != null && pa != null && ph !== pa) winner = ph > pa ? home : away;
+        else winner = pred.pred_winner || home;
+        world[mid].home_score = ph != null ? ph : 1;
+        world[mid].away_score = pa != null ? pa : 0;
+        world[mid].winner = winner;
+        if (ph === pa) {
+          world[mid].pen_home = pred.pred_pen_home != null ? parseInt(pred.pred_pen_home) : 3;
+          world[mid].pen_away = pred.pred_pen_away != null ? parseInt(pred.pred_pen_away) : 2;
+          if (winner === away && world[mid].pen_home >= world[mid].pen_away) { world[mid].pen_home = 2; world[mid].pen_away = 3; }
+        }
+      } else {
+        world[mid].home_score = 1; world[mid].away_score = 0; world[mid].winner = home;
+      }
+    }
+    return world;
+  }
+
+  // Para cada usuario: ¿en su propio mejor mundo posible, queda 1º (solo o empatado)?
+  const contenders = [];
+  for (const u of regs) {
+    const world = buildWorldFor(u.user_id);
+    const scores = regs.map(v => ({ uid: v.user_id, pts: scoreUserInWorld(v.user_id, world) }));
+    const topPts = Math.max(...scores.map(s => s.pts));
+    const myPts = scores.find(s => s.uid === u.user_id).pts;
+    if (myPts === topPts) contenders.push(u.user_id);
+  }
+  const contenderSet = new Set(contenders);
+  const withStatus = leaderboard.map(u => ({ ...u, canBeChampion: contenderSet.has(u.user_id) }));
+
   const leader = withStatus[0] || null;
-  const championLocked = !!leader && withStatus.slice(1).every(v => v.maxPossible < leader.points);
+  // El título está definido si SOLO una persona conserva un camino real al 1er lugar.
   const championStatus = leader ? {
-    locked: championLocked,
-    leaderName: leader.display_name,
-    leaderPoints: leader.points
-  } : { locked: false, leaderName: null, leaderPoints: 0 };
+    locked: contenders.length === 1,
+    contendersCount: contenders.length,
+    leaderName: contenders.length === 1
+      ? withStatus.find(u => u.user_id === contenders[0])?.display_name
+      : leader.display_name,
+    leaderPoints: contenders.length === 1
+      ? withStatus.find(u => u.user_id === contenders[0])?.points
+      : leader.points
+  } : { locked: false, contendersCount: 0, leaderName: null, leaderPoints: 0 };
 
   const totalPot = regs.length * netFee;
   res.json({
@@ -2087,197 +2246,4 @@ app.put('/api/admin/podium', authMiddleware, adminMiddleware, (req, res) => {
     VALUES (1, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       first_place = excluded.first_place,
-      second_place = excluded.second_place,
-      third_place = excluded.third_place
-  `).run(first_place || null, second_place || null, third_place || null);
-  res.json({ success: true });
-});
-
-// Exportar reporte CSV de usuarios con pagos y estado del bracket
-app.get('/api/admin/users/export-csv', authMiddleware, adminMiddleware, (req, res) => {
-  const users = db.prepare(`
-    SELECT u.id, u.display_name, u.username,
-           MAX(CASE WHEN r.polla='groups'   AND r.paid=1 THEN 1 ELSE 0 END) as paid_groups,
-           MAX(CASE WHEN r.polla='knockout' AND r.paid=1 THEN 1 ELSE 0 END) as paid_knockout
-    FROM users u
-    LEFT JOIN polla_registrations r ON r.user_id = u.id
-    WHERE u.is_admin = 0
-    GROUP BY u.id
-    ORDER BY u.display_name
-  `).all();
-
-  const koMatches = db.prepare("SELECT id FROM matches WHERE phase != 'groups'").all();
-  const totalKO = koMatches.length;
-
-  const rows = users.map(u => {
-    const filled = db.prepare(`
-      SELECT COUNT(DISTINCT p.match_id) as c
-      FROM predictions p
-      JOIN matches m ON m.id = p.match_id
-      WHERE p.user_id = ? AND m.phase != 'groups'
-        AND (p.pred_home IS NOT NULL OR p.pred_winner IS NOT NULL)
-    `).get(u.id).c;
-
-    const ptsGroups   = calcUserTotalPoints ? null : null; // solo scoring de grupos si se quiere
-    const complete    = filled >= totalKO;
-
-    // Escapar campos para CSV
-    const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
-
-    return [
-      esc(u.display_name),
-      esc(u.username),
-      esc(u.paid_groups  ? 'Sí' : 'No'),
-      esc(u.paid_knockout ? 'Sí' : 'No'),
-      esc(`${filled}/${totalKO}`),
-      esc(complete ? 'Completo' : 'Incompleto')
-    ].join(',');
-  });
-
-  const header = '"Nombre","Usuario","Pagó Grupos","Pagó Eliminatorias","Bracket KO","Estado Bracket"';
-  const csv = [header, ...rows].join('\r\n');
-
-  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-  res.setHeader('Content-Disposition', 'attachment; filename="polla-usuarios.csv"');
-  res.send('\uFEFF' + csv); // BOM para que Excel lo abra bien
-});
-
-// Descargar la base de datos completa (backup) — solo admin
-app.get('/api/admin/backup-db', authMiddleware, adminMiddleware, (req, res) => {
-  const fecha = new Date().toISOString().slice(0, 10);
-  res.setHeader('Content-Type', 'application/octet-stream');
-  res.setHeader('Content-Disposition', `attachment; filename="polla-backup-${fecha}.db"`);
-  res.sendFile(DB_PATH, (err) => {
-    if (err && !res.headersSent) {
-      res.status(500).json({ error: 'No se pudo generar el backup: ' + err.message });
-    }
-  });
-});
-
-app.get('/api/admin/users', authMiddleware, adminMiddleware, (req, res) => {
-  const users = db.prepare('SELECT id, username, display_name, is_admin, paid_entry, created_at FROM users ORDER BY created_at DESC').all();
-  const result = users.map(u => {
-    const r1 = db.prepare("SELECT paid FROM polla_registrations WHERE user_id = ? AND polla = 'groups'").get(u.id);
-    const r2 = db.prepare("SELECT paid FROM polla_registrations WHERE user_id = ? AND polla = 'knockout'").get(u.id);
-    return {
-      ...u,
-      paid_groups: r1 ? !!r1.paid : false,
-      paid_knockout: r2 ? !!r2.paid : false
-    };
-  });
-  res.json(result);
-});
-
-app.put('/api/admin/users/:id', authMiddleware, adminMiddleware, (req, res) => {
-  const { display_name, username, is_admin, paid_entry } = req.body || {};
-  if (username) {
-    const clash = db.prepare('SELECT id FROM users WHERE username = ? AND id != ?').get(username.toLowerCase(), req.params.id);
-    if (clash) return res.status(409).json({ error: 'Ese usuario ya existe' });
-  }
-  db.prepare(`
-    UPDATE users SET
-      display_name = COALESCE(?, display_name),
-      username     = COALESCE(?, username),
-      is_admin     = COALESCE(?, is_admin),
-      paid_entry   = COALESCE(?, paid_entry)
-    WHERE id = ?
-  `).run(
-    display_name ?? null,
-    username ? username.toLowerCase() : null,
-    is_admin != null ? (is_admin ? 1 : 0) : null,
-    paid_entry != null ? (paid_entry ? 1 : 0) : null,
-    req.params.id
-  );
-  res.json({ success: true });
-});
-
-// Confirmar pago de polla por usuario (desde panel de usuarios)
-app.put('/api/admin/users/:id/polla/:polla/paid', authMiddleware, adminMiddleware, (req, res) => {
-  const { id, polla } = req.params;
-  const { paid } = req.body || {};
-  if (!['groups', 'knockout'].includes(polla))
-    return res.status(400).json({ error: 'Polla inválida' });
-
-  // Upsert en polla_registrations
-  db.prepare(`
-    INSERT INTO polla_registrations (user_id, polla, paid)
-    VALUES (?, ?, ?)
-    ON CONFLICT(user_id, polla) DO UPDATE SET paid = excluded.paid
-  `).run(id, polla, paid ? 1 : 0);
-
-  // También actualizar paid_entry general si se confirma cualquier polla
-  if (paid) {
-    db.prepare('UPDATE users SET paid_entry = 1 WHERE id = ?').run(id);
-  } else {
-    // Si se quita ambas pollas, quitar paid_entry general
-    const r1 = db.prepare("SELECT paid FROM polla_registrations WHERE user_id = ? AND polla = 'groups'").get(id);
-    const r2 = db.prepare("SELECT paid FROM polla_registrations WHERE user_id = ? AND polla = 'knockout'").get(id);
-    if (!r1?.paid && !r2?.paid) {
-      db.prepare('UPDATE users SET paid_entry = 0 WHERE id = ?').run(id);
-    }
-  }
-
-  res.json({ success: true });
-});
-
-app.post('/api/admin/users/:id/reset-password', authMiddleware, adminMiddleware, (req, res) => {
-  const { password } = req.body || {};
-  if (!password || password.length < 4) return res.status(400).json({ error: 'Contrasena muy corta' });
-  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(bcrypt.hashSync(password, 10), req.params.id);
-  res.json({ success: true });
-});
-
-app.delete('/api/admin/users/:id', authMiddleware, adminMiddleware, (req, res) => {
-  if (parseInt(req.params.id) === req.user.id)
-    return res.status(400).json({ error: 'No puedes eliminarte a ti mismo' });
-  db.prepare('DELETE FROM users WHERE id = ?').run(req.params.id);
-  res.json({ success: true });
-});
-
-app.get('/api/settings', (req, res) => {
-  res.json(Object.fromEntries(db.prepare('SELECT * FROM settings').all().map(r => [r.key, r.value])));
-});
-
-// Admin: marcar pago de mini-polla
-app.put('/api/admin/mini-polla/:phase/users/:userId/paid', authMiddleware, adminMiddleware, (req, res) => {
-  const { phase, userId } = req.params;
-  const { paid } = req.body || {};
-  db.prepare(
-    'UPDATE mini_polla_registrations SET paid = ? WHERE user_id = ? AND phase = ?'
-  ).run(paid ? 1 : 0, userId, phase);
-  res.json({ success: true });
-});
-
-// Admin: editar montos de mini-pollas
-app.put('/api/admin/mini-polla/fees', authMiddleware, adminMiddleware, (req, res) => {
-  const { fee_r16, fee_qf, fee_sf_qf, fee_sf_sf } = req.body || {};
-  if (fee_r16)   db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('mini_polla_fee_r16',   String(fee_r16));
-  if (fee_qf)    db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('mini_polla_fee_qf',    String(fee_qf));
-  if (fee_sf_qf) db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('mini_polla_fee_sf_qf', String(fee_sf_qf));
-  if (fee_sf_sf) db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('mini_polla_fee_sf_sf', String(fee_sf_sf));
-  res.json({ success: true });
-});
-
-// ENDPOINT TEMPORAL DE PRUEBA — ELIMINAR DESPUÉS
-app.get('/api/admin/set-test-date', authMiddleware, adminMiddleware, (req, res) => {
-  const now = new Date();
-  const local = new Date(now.getTime() + (-5 * 60 - now.getTimezoneOffset()) * 60000);
-  const today = local.toISOString().split('T')[0];
-  db.prepare("UPDATE matches SET match_date = ?, match_time = '14:00' WHERE id = 'G-A-1'").run(today);
-  res.json({ success: true, today });
-});
-
-app.get('/api/admin/restore-test-date', authMiddleware, adminMiddleware, (req, res) => {
-  db.prepare("UPDATE matches SET match_date = '2026-06-11', match_time = '14:00' WHERE id = 'G-A-1'").run();
-  res.json({ success: true });
-});
-
-app.get('*', (req, res, next) => {
-  if (req.path.startsWith('/api')) return next();
-  res.sendFile(path.join(__dirname, '..', 'frontend', 'index.html'));
-});
-
-app.listen(PORT, () => {
-  console.log(`Servidor en puerto ${PORT}`);
-  console.log(`Predicciones bloqueadas: ${areGroupPredictionsLocked()}`);
-});
+  
