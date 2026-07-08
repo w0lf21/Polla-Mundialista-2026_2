@@ -223,6 +223,31 @@ function getDeadKOMatchIds(db, userId) {
     return resolved[matchId];
   };
 
+  // ── Reconvergencia de cruce ──────────────────────────────────────────────
+  // Un cruce "reconverge" cuando, más allá de un error anterior en el camino
+  // del usuario, los DOS equipos reales de ESTA llave (una vez confirmados)
+  // terminan coincidiendo exactamente con los dos equipos que el bracket del
+  // usuario predice para esa misma llave. En ese caso el error anterior ya no
+  // tiene ninguna influencia sobre quién juega aquí — el cruce es real y
+  // completo, no una coincidencia de nombre con un rival distinto — así que
+  // NO hereda la "muerte" de sus ancestros; se califica de forma normal.
+  //
+  // Esto es distinto de una simple coincidencia de GANADOR con un rival
+  // equivocado (ej. predecir "Alemania vs Francia, gana Francia" cuando el
+  // cruce real fue "Paraguay vs Francia, gana Francia" — ahí solo coincide
+  // el nombre, no el cruce, y ese partido permanece muerto). La reconvergencia
+  // exige que AMBOS equipos coincidan, no solo uno.
+  const reconvCache = {};
+  const hasReconverged = (matchId) => {
+    if (matchId in reconvCache) return reconvCache[matchId];
+    const real = matchById[matchId];
+    if (!real || !real.home_team || !real.away_team) return reconvCache[matchId] = false;
+    const { homeCode, awayCode } = resolveMatch(matchId);
+    const r = (homeCode === real.home_team && awayCode === real.away_team) ||
+              (homeCode === real.away_team && awayCode === real.home_team);
+    return reconvCache[matchId] = r;
+  };
+
   const deadCache = {};
   const isDead = (matchId) => {
     if (matchId in deadCache) return deadCache[matchId];
@@ -235,6 +260,18 @@ function getDeadKOMatchIds(db, userId) {
       const predW = userWinnerOf(matchId, homeCode, awayCode);
       return deadCache[matchId] = (!!predW && predW !== real.winner);
     }
+
+    // Cruce reconvergido: se evalúa de forma independiente (sin heredar
+    // muerte de ancestros), solo con su propio resultado si ya se jugó.
+    if (hasReconverged(matchId)) {
+      if (real && real.home_score != null && real.winner) {
+        const { homeCode, awayCode } = resolveMatch(matchId);
+        const predW = userWinnerOf(matchId, homeCode, awayCode);
+        return deadCache[matchId] = (!!predW && predW !== real.winner);
+      }
+      return deadCache[matchId] = false;
+    }
+
     if (matchId === 'TP') {
       if (isDead('SF-5') || isDead('SF-6')) return deadCache[matchId] = true;
       if (real && real.home_score != null && real.winner) {
@@ -262,7 +299,11 @@ function getDeadKOMatchIds(db, userId) {
   // el partido se fue a penales, aunque se haya fallado quién ganó la tanda) y el 0
   // por fallar al ganador en partidos definidos en 90 min. Así preservamos la tabla
   // de puntos prometida a los usuarios y solo anulamos los partidos río abajo.
+  // EXCEPCIÓN: si la llave ya "reconvergió" (ver hasReconverged arriba), nunca se
+  // marca muerta por herencia — el camino revivió porque el cruce ya es 100% real.
   for (const m of koMatches) {
+    if (m.id.startsWith('R32')) continue;
+    if (hasReconverged(m.id)) continue;
     let feeders = null;
     if (m.id === 'TP') feeders = ['SF-5', 'SF-6'];
     else feeders = KO_QF_PAIRS[m.id] || KO_SF_PAIRS[m.id] || (m.id === 'FINAL' ? KO_FINAL_PAIR : null);
