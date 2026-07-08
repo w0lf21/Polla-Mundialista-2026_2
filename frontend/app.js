@@ -373,6 +373,24 @@ const app = {
 
     // Detecta llaves "muertas": ya jugadas en la realidad y el usuario predijo mal,
     // o dependen de una llave que ya está muerta.
+    //
+    // Reconvergencia de cruce: si más allá de un error anterior, los DOS equipos
+    // reales de ESTA llave (una vez confirmados) coinciden exactamente con los
+    // dos equipos que predice el bracket del usuario, el cruce "revivió" — el
+    // error anterior ya no influye en quién juega aquí. No hereda muerte de sus
+    // ancestros; se evalúa solo con su propio resultado. Distinto de una simple
+    // coincidencia de GANADOR con un rival equivocado (eso sigue muerto).
+    const reconvCache = {};
+    const hasReconverged = (matchId) => {
+      if (matchId in reconvCache) return reconvCache[matchId];
+      const real = matchById[matchId];
+      if (!real || !real.home_team || !real.away_team) return reconvCache[matchId] = false;
+      const { homeCode, awayCode } = resolveMatch(matchId);
+      const r = (homeCode === real.home_team && awayCode === real.away_team) ||
+                (homeCode === real.away_team && awayCode === real.home_team);
+      return reconvCache[matchId] = r;
+    };
+
     const deadCache = {};
     const isDead = (matchId) => {
       if (matchId in deadCache) return deadCache[matchId];
@@ -384,6 +402,14 @@ const app = {
         const { homeCode, awayCode } = resolveMatch(matchId);
         const predW = userWinnerOf(matchId, homeCode, awayCode);
         return deadCache[matchId] = (!!predW && predW !== real.winner);
+      }
+      if (hasReconverged(matchId)) {
+        if (real && real.home_score != null && real.winner) {
+          const { homeCode, awayCode } = resolveMatch(matchId);
+          const predW = userWinnerOf(matchId, homeCode, awayCode);
+          return deadCache[matchId] = (!!predW && predW !== real.winner);
+        }
+        return deadCache[matchId] = false;
       }
       if (matchId === 'TP') {
         if (isDead('SF-5') || isDead('SF-6')) return deadCache[matchId] = true;
@@ -1577,6 +1603,22 @@ const app = {
     // ── Detectar llaves eliminadas ────────────────────────────────────────────
     // Una llave es "muerta" si ya hay resultado real y el usuario predijo el equipo
     // equivocado, O si alguna llave anterior de la que depende ya está muerta.
+    //
+    // Reconvergencia de cruce: si más allá de un error anterior, los DOS equipos
+    // reales de esta llave (ya confirmados) coinciden exactamente con los dos
+    // equipos que predice el bracket del usuario, el cruce "revivió" — ya no
+    // hereda muerte de sus ancestros, se evalúa solo con su propio resultado.
+    const reconvCache = {};
+    const hasReconverged = (matchId) => {
+      if (matchId in reconvCache) return reconvCache[matchId];
+      const real = matchById[matchId];
+      if (!real || !real.home_team || !real.away_team) return reconvCache[matchId] = false;
+      const r = resolveMatch(matchId);
+      const ok = (r.home === real.home_team && r.away === real.away_team) ||
+                 (r.home === real.away_team && r.away === real.home_team);
+      return reconvCache[matchId] = ok;
+    };
+
     const deadCache = {};
     const isDead = (matchId) => {
       if (matchId in deadCache) return deadCache[matchId];
@@ -1587,6 +1629,15 @@ const app = {
         if (!real || real.home_score == null) return deadCache[matchId] = false;
         const predW = winnerOf(matchId, real.home_team, real.away_team);
         return deadCache[matchId] = (!!real.winner && predW !== real.winner);
+      }
+
+      if (hasReconverged(matchId)) {
+        if (real && real.home_score != null && real.winner) {
+          const r = resolveMatch(matchId);
+          const predW = winnerOf(matchId, r.home, r.away);
+          return deadCache[matchId] = (!!predW && predW !== real.winner);
+        }
+        return deadCache[matchId] = false;
       }
 
       // TP: muerta si SF-5 o SF-6 están muertas (usuario predijo mal quien llega)
