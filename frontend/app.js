@@ -1858,4 +1858,2583 @@ const app = {
       const bracketHtml = `<div class="updm-bracket">
         <div class="updm-side">${col(['R32-3','R32-5','R32-1','R32-4','R32-11','R32-12','R32-9','R32-10'],'Dieciseisavos')}${col(['QF-1','QF-2','QF-5','QF-6'],'Octavos')}${col(['SF-1','SF-2'],'Cuartos')}${col(['SF-5'],'Semis')}</div>
         <div class="updm-center"><div class="updm-clabel">Gran Final</div>${card('FINAL')}<div class="updm-clabel" style="margin-top:16px">3er Puesto</div>${card('TP')}</div>
-        <div class="updm-side updm-right">${col(['SF-6'],'Semis')}${col(['SF-3','SF-4'],'Cuartos')}${col(['QF-3','QF-4','QF-7
+        <div class="updm-side updm-right">${col(['SF-6'],'Semis')}${col(['SF-3','SF-4'],'Cuartos')}${col(['QF-3','QF-4','QF-7','QF-8'],'Octavos')}${col(['R32-2','R32-6','R32-7','R32-8','R32-14','R32-16','R32-13','R32-15'],'Dieciseisavos')}</div>
+      </div>`;
+
+      // Si la Polla 2 sigue abierta, el servidor oculta los picks de eliminatorias de otros
+      const koNote = (!this.user.is_admin && this.lockStatus && !this.lockStatus.polla2Locked)
+        ? `<div class="updm-note">🔒 Los pronósticos de eliminatorias de otros participantes serán visibles cuando cierre la Polla 2.</div>` : '';
+
+      let podiumHtml = '';
+      if (podiumData?.first_place) {
+        const t1 = this.teamByCode(podiumData.first_place);
+        const t2 = podiumData.second_place ? this.teamByCode(podiumData.second_place) : null;
+        const t3 = podiumData.third_place ? this.teamByCode(podiumData.third_place) : null;
+        podiumHtml = `<div class="updm-podium">
+          <div class="updm-gtitle" style="color:var(--color-primary)">Podio pronosticado</div>
+          <div style="display:flex;justify-content:center;gap:18px;flex-wrap:wrap">
+            <div style="text-align:center"><div style="font-size:22px">🥇</div><div style="font-size:13px;font-weight:700">${t1.flag} ${t1.name}</div></div>
+            ${t2?`<div style="text-align:center"><div style="font-size:22px">🥈</div><div style="font-size:13px">${t2.flag} ${t2.name}</div></div>`:''}
+            ${t3?`<div style="text-align:center"><div style="font-size:22px">🥉</div><div style="font-size:13px">${t3.flag} ${t3.name}</div></div>`:''}
+          </div>
+        </div>`;
+      }
+
+      container.innerHTML = `
+        <div class="updm-summary"><strong style="color:var(--color-primary)">📊</strong> Grupos: <strong>${filledGroup}/${groupMatches.length}</strong> partidos pronosticados</div>
+        <h3 class="updm-h">Fase de Grupos</h3>
+        <div class="updm-grid">${groupsHtml}</div>
+        ${best8Html}
+        <h3 class="updm-h">Eliminatorias</h3>
+        <div class="updm-hint">← Desliza horizontalmente para ver el bracket →</div>
+        <div class="updm-bwrap">${bracketHtml}</div>
+        ${koNote}
+        ${podiumHtml}`;
+    } catch (e) {
+      container.innerHTML = `<div style="text-align:center;color:var(--color-danger);padding:1.5rem">⚠️ ${e.message}</div>`;
+    }
+  },
+
+  // ── HOY ────────────────────────────────────────────────────────────────────
+
+  async renderToday(main) {
+    main.innerHTML = '<h2>Partidos de hoy</h2><div style="color:var(--color-text-muted)">Cargando...</div>';
+    try {
+      const [data, settings] = await Promise.all([
+        this.api('/daily-bets/today'),
+        this.api('/settings')
+      ]);
+      const betAmount = settings.daily_bet_amount || 2;
+      this._dailyBetAmount = betAmount;
+      if (!data.matches.length) {
+        main.innerHTML = `<h2>Partidos de hoy</h2><div class="empty-state"><div class="empty-state-icon">⚽</div><p>No hay partidos hoy (${data.date} hora Ecuador).</p></div>`;
+        return;
+      }
+
+      const resultsMap = {};
+      await Promise.all(
+        data.matches
+          .filter(m => m.home_score != null)
+          .map(async m => {
+            try {
+              resultsMap[m.id] = await this.api(`/daily-bets/results/${m.id}`);
+            } catch (e) {}
+          })
+      );
+
+      main.innerHTML = `
+        <h2>Partidos de hoy · ${data.date}</h2>
+        <div class="notice">Apuesta $${betAmount} por partido. Quienes aciertan el marcador exacto se reparten el pote. Cierra <strong>5 minutos</strong> antes de cada partido.</div>
+        ${data.matches.map(m => this.renderDailyMatch(m, resultsMap[m.id])).join('')}
+      `;
+      main.querySelectorAll('.daily-bet-form').forEach(form => {
+        form.addEventListener('submit', (e) => this.saveDailyBet(e, form));
+      });
+    } catch (e) {
+      main.innerHTML = `<h2>Partidos de hoy</h2><div class="empty-state">Error: ${e.message}</div>`;
+    }
+  },
+
+  renderDailyMatch(m, result) {
+    const locked = m.locked || m.home_score != null;
+    const myBet = m.myBet || {};
+    const timeStr = m.match_time ? `${m.match_time} (ECU)` : '';
+    const finished = m.home_score != null;
+
+    let resultBlock = '';
+    if (finished && result && result.status === 'finished') {
+      const { potType, totalPot, perWinner, winners, myResult, carried } = result;
+
+      let potMsg = '', potStyle = '';
+      if (carried) {
+        potMsg = `⏩ Nadie acertó — el pote de <strong>$${totalPot.toFixed(2)}</strong> se acumula al siguiente partido`;
+        potStyle = 'color:var(--color-text-muted)';
+      } else if (potType === 'exacto') {
+        potMsg = `🎯 Marcador exacto — ${winners.length} ganador${winners.length > 1 ? 'es' : ''} se reparten <strong>$${totalPot.toFixed(2)}</strong> (<strong>$${perWinner}</strong> c/u)`;
+        potStyle = 'color:var(--color-success)';
+      } else if (potType === 'ganador') {
+        potMsg = `✅ Ganador correcto — ${winners.length} ganador${winners.length > 1 ? 'es' : ''} se reparten <strong>$${totalPot.toFixed(2)}</strong> (<strong>$${perWinner}</strong> c/u)`;
+        potStyle = 'color:var(--color-success)';
+      }
+
+      let myResultBlock = '';
+      if (myResult) {
+        if (myResult.won) {
+          myResultBlock = `<div style="margin-top:6px;padding:8px 12px;background:rgba(34,197,94,0.1);border-radius:8px;border:1px solid rgba(34,197,94,0.3);font-size:13px;font-weight:600;color:var(--color-success)">
+            🏆 ¡Ganaste! Tu pronóstico: ${myResult.pred} · Premio: <strong>$${myResult.prize}</strong>
+          </div>`;
+        } else {
+          myResultBlock = `<div style="margin-top:6px;padding:8px 12px;background:var(--color-background-secondary);border-radius:8px;font-size:13px;color:var(--color-text-muted)">
+            Tu pronóstico: ${myResult.pred} · No ganaste esta vez
+          </div>`;
+        }
+      }
+
+      const winnersBlock = winners.length > 0 ? `
+        <div style="margin-top:6px;font-size:12px;color:var(--color-text-muted)">
+          Ganadores: ${winners.map(w => `<strong>${w.display_name}</strong> (${w.pred})`).join(', ')}
+        </div>` : '';
+
+      resultBlock = `
+        <div style="margin-top:10px;padding:10px 12px;background:var(--color-background-secondary);border-radius:8px;border-top:2px solid var(--color-border-secondary)">
+          <div style="font-size:13px;${potStyle}">${potMsg}</div>
+          ${winnersBlock}
+          ${myResultBlock}
+        </div>
+      `;
+    }
+
+    return `
+      <form class="card daily-bet-form" data-match="${m.id}">
+        <div class="match-grid">
+          <div class="team-cell">
+            <span class="team-flag">${m.home_flag || '?'}</span>
+            <span class="team-name">${m.home_name || m.home_team}</span>
+          </div>
+          <div class="score-inputs">
+            <input type="number" min="0" max="20" class="score-input" name="home" value="${myBet.pred_home ?? ''}" ${locked ? 'disabled' : ''} placeholder="0">
+            <span class="score-separator">—</span>
+            <input type="number" min="0" max="20" class="score-input" name="away" value="${myBet.pred_away ?? ''}" ${locked ? 'disabled' : ''} placeholder="0">
+          </div>
+          <div class="team-cell away">
+            <span class="team-name">${m.away_name || m.away_team}</span>
+            <span class="team-flag">${m.away_flag || '?'}</span>
+          </div>
+        </div>
+        <div class="match-meta">
+          <span>${timeStr}</span>
+          ${finished ? `<span class="match-result-badge correct">Real: ${m.home_score}–${m.away_score}</span>` : ''}
+        </div>
+        <div class="bet-bar">
+          <span style="font-size:13px;color:var(--color-text-muted)">Apuesta: $${this._dailyBetAmount || 2}</span>
+          <input type="hidden" name="bet" value="${this._dailyBetAmount || 2}">
+          <span style="flex:1"></span>
+          <span style="font-size:12px;color:var(--color-text-muted)">Pote: $${(m.pot||0).toFixed(0)} · ${m.totalBets} apuestas</span>
+          ${locked
+            ? `<span class="chip ${finished ? 'paid' : 'unpaid'}">${finished ? 'Terminado' : 'Cerrado'}</span>`
+            : '<button type="submit" class="btn-sm btn-accent">Apostar</button>'}
+        </div>
+        ${resultBlock}
+        <div class="success-msg" data-msg></div>
+      </form>
+    `;
+  },
+
+  async saveDailyBet(e, form) {
+    e.preventDefault();
+    const msg = form.querySelector('[data-msg]');
+    const home = form.querySelector('[name=home]').value;
+    const away = form.querySelector('[name=away]').value;
+    if (home === '' || away === '') {
+      msg.textContent = 'Ingresa ambos marcadores.';
+      msg.style.color = 'var(--color-danger)';
+      return;
+    }
+    try {
+      const amount = this._dailyBetAmount || 2;
+      await this.api('/daily-bets', {
+        method: 'POST',
+        body: JSON.stringify({ match_id: form.dataset.match, pred_home: parseInt(home), pred_away: parseInt(away), bet_amount: amount })
+      });
+      msg.textContent = `Apuesta registrada por $${amount}.`;
+      msg.style.color = 'var(--color-success)';
+      setTimeout(() => { msg.textContent = ''; this.renderView(); }, 2000);
+    } catch (err) {
+      msg.textContent = err.message;
+      msg.style.color = 'var(--color-danger)';
+    }
+  },
+
+  // ── GRUPOS ──────────────────────────────────────────────────────────────────
+
+  renderGroups(main) {
+    const groups = {};
+    this.matches.filter(m => m.phase === 'groups').forEach(m => {
+      if (!groups[m.group_name]) groups[m.group_name] = [];
+      groups[m.group_name].push(m);
+    });
+
+    const locked = this.lockStatus.polla1Locked || this.lockStatus.locked;
+    const lockMsg = locked
+      ? `<div class="notice" style="background:rgba(224,82,82,0.08);border-color:rgba(224,82,82,0.3);color:var(--color-danger)">Las predicciones de grupos están cerradas.</div>`
+      : `<div class="notice">Se cierran <strong>5 minutos antes del primer partido</strong> (${this.lockStatus.lockTimeEcuador || ''} hora Ecuador).</div>`;
+
+    main.innerHTML = `
+      <h2>Fase de grupos</h2>
+      ${lockMsg}
+      ${Object.keys(groups).sort().map(g => `
+        <div class="group-header"><span class="group-badge" data-group="${g}">Grupo ${g}</span></div>
+        ${groups[g].map(m => this.renderGroupMatchCard(m, locked)).join('')}
+      `).join('')}
+      ${!locked ? `<div class="save-bar">
+        <span class="success-msg" id="groups-save-msg"></span>
+        <button class="btn-primary" style="width:auto;margin:0" onclick="app.saveAllGroupPreds()">Guardar todas</button>
+      </div>` : ''}
+    `;
+
+    if (!locked) {
+      main.querySelectorAll('.score-input[data-match]').forEach(i => {
+        i.addEventListener('blur', () => this.autoSavePrediction(i));
+      });
+    }
+  },
+
+  renderGroupMatchCard(m, locked) {
+    const p = this.predictions[m.id] || {};
+    const timeStr = m.match_time ? `${m.match_date} · ${m.match_time} (ECU)` : m.match_date || '';
+    return `
+      <div class="match-row ${locked ? 'locked' : ''}" data-group="${m.group_name}">
+        <div class="match-grid">
+          <div class="team-cell">
+            <span class="team-flag">${m.home_flag || '?'}</span>
+            <span class="team-name">${m.home_name || m.home_team}</span>
+          </div>
+          <div class="score-inputs">
+            <input type="number" min="0" max="20" class="score-input" data-match="${m.id}" data-field="home" value="${p.pred_home ?? ''}" ${locked ? 'disabled' : ''} placeholder="—">
+            <span class="score-separator">—</span>
+            <input type="number" min="0" max="20" class="score-input" data-match="${m.id}" data-field="away" value="${p.pred_away ?? ''}" ${locked ? 'disabled' : ''} placeholder="—">
+          </div>
+          <div class="team-cell away">
+            <span class="team-name">${m.away_name || m.away_team}</span>
+            <span class="team-flag">${m.away_flag || '?'}</span>
+          </div>
+        </div>
+        <div class="match-meta">
+          <span>${timeStr}</span>
+          ${m.home_score != null ? `<span class="match-result-badge correct">Real: ${m.home_score}–${m.away_score}</span>` : ''}
+        </div>
+      </div>
+    `;
+  },
+
+  async autoSavePrediction(input) {
+    const matchId = input.dataset.match;
+    const field = input.dataset.field;
+    const value = input.value === '' ? null : parseInt(input.value);
+    if (!this.predictions[matchId]) this.predictions[matchId] = { match_id: matchId };
+    this.predictions[matchId]['pred_' + field] = value;
+    const p = this.predictions[matchId];
+    if (p.pred_home == null || p.pred_away == null) return;
+    try {
+      await this.api('/predictions', {
+        method: 'POST',
+        body: JSON.stringify({ match_id: matchId, pred_home: p.pred_home, pred_away: p.pred_away })
+      });
+      this.koTeams = await this.api('/predictions/ko-teams');
+      input.style.borderColor = 'var(--color-success)';
+      setTimeout(() => input.style.borderColor = '', 800);
+    } catch (e) { input.style.borderColor = 'var(--color-danger)'; }
+  },
+
+  async saveAllGroupPreds() {
+    const batch = {};
+    document.querySelectorAll('.score-input[data-match]').forEach(i => {
+      const mid = i.dataset.match;
+      if (!batch[mid]) batch[mid] = { match_id: mid };
+      batch[mid]['pred_' + i.dataset.field] = i.value === '' ? null : parseInt(i.value);
+    });
+    const toSave = Object.values(batch).filter(p => p.pred_home != null && p.pred_away != null);
+    const msg = document.getElementById('groups-save-msg');
+    try {
+      await this.api('/predictions/batch', { method: 'POST', body: JSON.stringify({ predictions: toSave }) });
+      this.koTeams = await this.api('/predictions/ko-teams');
+      msg.textContent = `✓ ${toSave.length} predicciones guardadas.`;
+      msg.style.color = 'var(--color-success)';
+      document.querySelectorAll('.match-row').forEach(row => {
+        row.classList.add('save-flash');
+        setTimeout(() => row.classList.remove('save-flash'), 700);
+      });
+      setTimeout(() => { msg.textContent = ''; msg.style.color = ''; }, 3000);
+    } catch (e) { msg.textContent = e.message; msg.style.color = 'var(--color-danger)'; }
+  },
+
+  // ── ELIMINATORIAS ───────────────────────────────────────────────────────────
+
+  koFeederLabel(matchId) {
+    const QF_PAIRS = { 'QF-1': ['R32-3','R32-5'], 'QF-2': ['R32-1','R32-4'], 'QF-3': ['R32-2','R32-6'], 'QF-4': ['R32-7','R32-8'], 'QF-5': ['R32-11','R32-12'], 'QF-6': ['R32-9','R32-10'], 'QF-7': ['R32-14','R32-16'], 'QF-8': ['R32-13','R32-15'] };
+    const SF_PAIRS = { 'SF-1': ['QF-1','QF-2'], 'SF-2': ['QF-5','QF-6'], 'SF-3': ['QF-3','QF-4'], 'SF-4': ['QF-7','QF-8'], 'SF-5': ['SF-1','SF-2'], 'SF-6': ['SF-3','SF-4'] };
+    const pretty = (id) => {
+      if (id.startsWith('R32')) return 'Dieciseisavos ' + id.replace('R32-','');
+      if (id.startsWith('QF')) return 'Octavos ' + id.replace('QF-','');
+      if (['SF-1','SF-2','SF-3','SF-4'].includes(id)) return 'Cuartos ' + id.replace('SF-','');
+      if (['SF-5','SF-6'].includes(id)) return 'Semifinal ' + (id === 'SF-5' ? '1' : '2');
+      return id;
+    };
+    const pair = QF_PAIRS[matchId] || SF_PAIRS[matchId] || (matchId === 'FINAL' ? ['SF-5','SF-6'] : (matchId === 'TP' ? ['SF-5','SF-6'] : null));
+    if (!pair) return 'las rondas anteriores';
+    return pair.map(pretty).join(' y ');
+  },
+
+  async renderKnockout(main) {
+    main.innerHTML = `<h2>Eliminatorias</h2><div style="color:var(--color-text-muted);font-size:14px">Cargando...</div>`;
+
+    const locked = this.lockStatus.polla2Locked || false;
+    const koMatches = this.matches.filter(m => m.phase !== 'groups');
+
+    // ── Cascada: derivar equipos de cada ronda desde la predicción del usuario ──
+    // R32 usa equipos reales (cargados por admin). QF en adelante se llena con
+    // el ganador que el usuario predijo en la ronda anterior, para que pueda
+    // pronosticar octavos sin esperar a que el admin cargue los resultados reales.
+    const matchesById = {};
+    this.matches.forEach(m => { matchesById[m.id] = m; });
+
+    // Partidos compensados: el ganador REAL avanza obligatoriamente en el bracket
+    // de todos (además de otorgar 5 pts). Se cargan una vez y se cachean.
+    let compensatedSet = this._compensatedSet || new Set();
+    try {
+      const resp = await this.api('/compensated-public').catch(() => null);
+      if (resp && resp.compensated) {
+        compensatedSet = new Set(resp.compensated);
+        this._compensatedSet = compensatedSet;
+      }
+    } catch (e) { /* usar cache si falla */ }
+
+    const QF_PAIRS  = { 'QF-1': ['R32-3','R32-5'], 'QF-2': ['R32-1','R32-4'], 'QF-3': ['R32-2','R32-6'], 'QF-4': ['R32-7','R32-8'], 'QF-5': ['R32-11','R32-12'], 'QF-6': ['R32-9','R32-10'], 'QF-7': ['R32-14','R32-16'], 'QF-8': ['R32-13','R32-15'] };
+    const SF_PAIRS  = { 'SF-1': ['QF-1','QF-2'], 'SF-2': ['QF-5','QF-6'], 'SF-3': ['QF-3','QF-4'], 'SF-4': ['QF-7','QF-8'], 'SF-5': ['SF-1','SF-2'], 'SF-6': ['SF-3','SF-4'] };
+    const FINAL_PAIR = ['SF-5','SF-6'];
+
+    const koWinnerOf = (matchId, homeCode, awayCode) => {
+      // Partido compensado con resultado real cargado: el ganador real avanza
+      // obligatoriamente, sin importar lo que el usuario haya predicho.
+      if (compensatedSet.has(matchId)) {
+        const real = matchesById[matchId];
+        if (real && real.winner) return real.winner;
+      }
+      const pred = this.predictions[matchId];
+      if (!pred) return null;
+      const ph = pred.pred_home != null ? parseInt(pred.pred_home) : null;
+      const pa = pred.pred_away != null ? parseInt(pred.pred_away) : null;
+      if (ph != null && pa != null && ph !== pa) return ph > pa ? homeCode : awayCode;
+      // Empate: definir por penales predichos
+      if (ph != null && pa != null && ph === pa) {
+        const pph = pred.pred_pen_home != null ? parseInt(pred.pred_pen_home) : null;
+        const ppa = pred.pred_pen_away != null ? parseInt(pred.pred_pen_away) : null;
+        if (pph != null && ppa != null && pph !== ppa) return pph > ppa ? homeCode : awayCode;
+      }
+      return pred.pred_winner || null;
+    };
+
+    const koResolved = {};
+    const koResolve = (matchId) => {
+      if (koResolved[matchId]) return koResolved[matchId];
+      let homeCode = null, awayCode = null;
+      const real = matchesById[matchId];
+
+      if (matchId.startsWith('R32')) {
+        homeCode = real?.home_team || null;
+        awayCode = real?.away_team || null;
+      } else {
+        const pair = QF_PAIRS[matchId] || SF_PAIRS[matchId] || (matchId === 'FINAL' ? FINAL_PAIR : null);
+        if (pair) {
+          const [a, b] = pair;
+          const ra = koResolve(a), rb = koResolve(b);
+          // Si el admin YA cargó el equipo real en esta llave, ese tiene prioridad.
+          // Si no, usar el ganador que el usuario predijo en la ronda anterior.
+          homeCode = real?.home_team || koWinnerOf(a, ra.homeCode, ra.awayCode);
+          awayCode = real?.away_team || koWinnerOf(b, rb.homeCode, rb.awayCode);
+        } else if (matchId === 'TP') {
+          // Tercer puesto: perdedores de las semifinales (SF-5, SF-6)
+          const r5 = koResolve('SF-5'), r6 = koResolve('SF-6');
+          const w5 = koWinnerOf('SF-5', r5.homeCode, r5.awayCode);
+          const w6 = koWinnerOf('SF-6', r6.homeCode, r6.awayCode);
+          homeCode = real?.home_team || (w5 ? (w5 === r5.homeCode ? r5.awayCode : r5.homeCode) : null);
+          awayCode = real?.away_team || (w6 ? (w6 === r6.homeCode ? r6.awayCode : r6.homeCode) : null);
+        }
+      }
+      koResolved[matchId] = { homeCode, awayCode };
+      return koResolved[matchId];
+    };
+
+    let html = `<h2>Eliminatorias</h2>`;
+    html += `<div class="notice">Ingresa el marcador de cada partido. Los <strong>dieciseisavos</strong> usan los equipos reales de la fase de grupos; las rondas siguientes se llenan automáticamente con <strong>los ganadores que tú predigas</strong>. Si hay empate aparecerán los campos de penales.${!locked && this.lockStatus.lockTimePolla2Ecuador ? ` Las predicciones se cierran <strong>5 minutos antes del primer partido de dieciseisavos</strong> (${this.lockStatus.lockTimePolla2Ecuador} hora Ecuador).` : ''}</div>`;
+    if (locked) {
+      html += `<div class="notice" style="background:rgba(224,82,82,0.08);border-color:rgba(224,82,82,0.3);color:var(--color-danger)">Las predicciones de eliminatorias están cerradas.</div>`;
+    }
+
+    const phases = [
+      { key: 'r16',   label: 'Dieciseisavos de final',  filter: m => m.phase === 'r16' },
+      { key: 'qf',    label: 'Octavos de final',         filter: m => m.phase === 'qf' },
+      { key: 'sf-qf', label: 'Cuartos de final',         filter: m => m.phase === 'sf' && ['SF-1','SF-2','SF-3','SF-4'].includes(m.id) },
+      { key: 'sf-sf', label: 'Semifinales',              filter: m => m.phase === 'sf' && ['SF-5','SF-6'].includes(m.id) },
+      { key: 'tp',    label: 'Tercer puesto',            filter: m => m.phase === 'tp' },
+      { key: 'final', label: 'Gran final',               filter: m => m.phase === 'final' }
+    ];
+
+    phases.forEach(phase => {
+      const matches = koMatches.filter(phase.filter);
+      if (!matches.length) return;
+      html += `<div class="group-header"><span class="group-badge">${phase.label}</span></div>`;
+
+      matches.forEach(m => {
+        const pred = this.predictions[m.id] || {};
+        // Equipos: reales si el admin los cargó, si no derivados de la predicción del usuario
+        const resolved = koResolve(m.id);
+        const homeCode = m.home_team || resolved.homeCode;
+        const awayCode = m.away_team || resolved.awayCode;
+        const homeTeam = homeCode ? this.teamByCode(homeCode) : null;
+        const awayTeam = awayCode ? this.teamByCode(awayCode) : null;
+        const timeStr = m.match_time ? `${m.match_date} · ${m.match_time} (ECU)` : m.match_date || '';
+        const predHome = pred.pred_home ?? '';
+        const predAway = pred.pred_away ?? '';
+        const predPenHome = pred.pred_pen_home ?? '';
+        const predPenAway = pred.pred_pen_away ?? '';
+        const isDraw = predHome !== '' && predAway !== '' && parseInt(predHome) === parseInt(predAway);
+
+        let autoWinner = null;
+        if (predHome !== '' && predAway !== '') {
+          const h = parseInt(predHome), a = parseInt(predAway);
+          if (h > a) autoWinner = homeTeam;
+          else if (a > h) autoWinner = awayTeam;
+          else if (predPenHome !== '' && predPenAway !== '') {
+            const ph = parseInt(predPenHome), pa = parseInt(predPenAway);
+            if (ph > pa) autoWinner = homeTeam;
+            else if (pa > ph) autoWinner = awayTeam;
+          }
+        }
+
+        // Normalizar el label: la BD trae prefijos heredados ("Octavos: 1J vs 2H")
+        // que no coinciden con la ronda real. Extraemos el cruce y anteponemos el nombre correcto.
+        const roundNames = { r16: 'Dieciseisavos', qf: 'Octavos', sf: ['SF-1','SF-2','SF-3','SF-4'].includes(m.id) ? 'Cuartos' : 'Semis', tp: 'Tercer puesto', final: 'Final' };
+        const rawLabel = m.label || '';
+        const crossPart = rawLabel.includes(':') ? rawLabel.split(':').slice(1).join(':').trim() : rawLabel;
+        const roundName = roundNames[m.phase] || '';
+        const displayLabel = crossPart ? `${roundName}: ${crossPart}` : (roundName || rawLabel);
+
+        html += `
+          <div class="card" style="margin-bottom:8px"
+            data-ko-match="${m.id}"
+            data-home-code="${homeCode || ''}"
+            data-away-code="${awayCode || ''}">
+            <div style="font-size:12px;color:var(--color-text-muted);margin-bottom:8px">${displayLabel} · ${timeStr}</div>
+            ${homeTeam || awayTeam ? `
+            <div class="match-grid" style="margin-bottom:${isDraw ? '8px' : '0'}">
+              <div class="team-cell">
+                <span class="team-flag">${homeTeam?.flag || '⏳'}</span>
+                <span class="team-name">${homeTeam?.name || 'Por definir'}</span>
+              </div>
+              <div class="score-inputs">
+                <input type="number" min="0" max="20" class="score-input ko-score" data-match="${m.id}" data-field="home" value="${predHome}" ${locked ? 'disabled' : ''} placeholder="—">
+                <span class="score-separator">—</span>
+                <input type="number" min="0" max="20" class="score-input ko-score" data-match="${m.id}" data-field="away" value="${predAway}" ${locked ? 'disabled' : ''} placeholder="—">
+              </div>
+              <div class="team-cell away">
+                <span class="team-name">${awayTeam?.name || 'Por definir'}</span>
+                <span class="team-flag">${awayTeam?.flag || '⏳'}</span>
+              </div>
+            </div>` : `
+            <div style="font-size:13px;color:var(--color-text-muted);margin-bottom:8px;font-style:italic">⏳ Predice ${this.koFeederLabel(m.id)} para habilitar este partido</div>`}
+            <div class="ko-pen-section" data-match="${m.id}" style="${isDraw ? '' : 'display:none'}">
+              <div style="font-size:12px;color:var(--color-text-muted);margin:8px 0 6px">⚖️ Empate — ingresa el marcador en penales:</div>
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                <span style="font-size:13px;font-weight:500">${homeTeam?.flag || ''} ${homeTeam?.name || ''}</span>
+                <input type="number" min="0" max="30" class="score-input ko-pen" data-match="${m.id}" data-field="pen_home" value="${predPenHome}" ${locked ? 'disabled' : ''} placeholder="—" style="width:44px;text-align:center">
+                <span class="score-separator">—</span>
+                <input type="number" min="0" max="30" class="score-input ko-pen" data-match="${m.id}" data-field="pen_away" value="${predPenAway}" ${locked ? 'disabled' : ''} placeholder="—" style="width:44px;text-align:center">
+                <span style="font-size:13px;font-weight:500">${awayTeam?.name || ''} ${awayTeam?.flag || ''}</span>
+              </div>
+            </div>
+            ${autoWinner ? `<div style="margin-top:8px;font-size:12px;color:var(--color-success);font-weight:500">✓ Avanza: ${autoWinner.flag || ''} ${autoWinner.name}${isDraw ? ' (por penales)' : ''}</div>` : (isDraw && (predPenHome === '' || predPenAway === '') ? `<div style="margin-top:8px;font-size:12px;color:var(--color-accent)">⚠️ Ingresa el marcador de penales para definir quién avanza</div>` : '')}
+            ${m.home_score != null ? `
+            <div style="margin-top:8px;font-size:12px;color:var(--color-text-muted);border-top:1px solid var(--color-border);padding-top:8px">
+              Resultado real: <strong>${m.home_score}–${m.away_score}</strong>
+              ${m.pen_home != null ? `· Penales: <strong>${m.pen_home}–${m.pen_away}</strong>` : ''}
+              ${m.winner ? `· Ganador: <strong>${this.teamByCode(m.winner).flag || ''} ${this.teamByCode(m.winner).name}</strong>` : ''}
+            </div>` : ''}
+          </div>
+        `;
+      });
+    });
+
+    html += `${!locked ? `<div class="save-bar">
+      <span class="success-msg" id="ko-save-msg"></span>
+      <button class="btn-primary" style="width:auto;margin:0" onclick="app.saveAllKOPreds()">Guardar todas</button>
+    </div>` : ''}`;
+
+    main.innerHTML = html;
+
+    if (!locked) {
+      main.querySelectorAll('.ko-score').forEach(input => {
+        input.addEventListener('input', () => {
+          const matchId = input.dataset.match;
+          const card = main.querySelector(`[data-ko-match="${matchId}"]`);
+          if (!card) return;
+          const hVal = card.querySelector('.ko-score[data-field="home"]')?.value;
+          const aVal = card.querySelector('.ko-score[data-field="away"]')?.value;
+          const penSection = card.querySelector('.ko-pen-section');
+          if (!penSection) return;
+          const drawNow = hVal !== '' && aVal !== '' && parseInt(hVal) === parseInt(aVal);
+          penSection.style.display = drawNow ? '' : 'none';
+          if (!drawNow) card.querySelectorAll('.ko-pen').forEach(p => { p.value = ''; });
+        });
+        input.addEventListener('blur', () => this.saveKOPrediction(input.dataset.match, main));
+      });
+      main.querySelectorAll('.ko-pen').forEach(input => {
+        input.addEventListener('blur', () => this.saveKOPrediction(input.dataset.match, main));
+      });
+    }
+  },
+
+  async saveAllKOPreds() {
+    const main = document.getElementById('main-content');
+    const cards = main.querySelectorAll('[data-ko-match]');
+    const msg = document.getElementById('ko-save-msg');
+    let saved = 0;
+    for (const card of cards) {
+      const matchId = card.dataset.koMatch;
+      if (matchId) { await this.saveKOPrediction(matchId, main); saved++; }
+    }
+    if (msg) {
+      msg.textContent = `✓ ${saved} predicciones guardadas.`;
+      msg.style.color = 'var(--color-success)';
+      cards.forEach(card => {
+        card.classList.add('save-flash');
+        setTimeout(() => card.classList.remove('save-flash'), 700);
+      });
+      setTimeout(() => { msg.textContent = ''; msg.style.color = ''; }, 3000);
+    }
+  },
+
+  async saveKOPrediction(matchId, main) {
+    const card = main ? main.querySelector(`[data-ko-match="${matchId}"]`) : null;
+    if (!card) return;
+    const homeCode = card.dataset.homeCode || null;
+    const awayCode = card.dataset.awayCode || null;
+    const homeInput = card.querySelector('.ko-score[data-field="home"]');
+    const awayInput = card.querySelector('.ko-score[data-field="away"]');
+    const penHomeInput = card.querySelector('.ko-pen[data-field="pen_home"]');
+    const penAwayInput = card.querySelector('.ko-pen[data-field="pen_away"]');
+    const predHome = homeInput?.value !== '' ? parseInt(homeInput.value) : null;
+    const predAway = awayInput?.value !== '' ? parseInt(awayInput.value) : null;
+    const predPenHome = penHomeInput?.value !== '' ? parseInt(penHomeInput.value) : null;
+    const predPenAway = penAwayInput?.value !== '' ? parseInt(penAwayInput.value) : null;
+    let effectiveWinner = null;
+    if (predHome !== null && predAway !== null) {
+      if (predHome > predAway) effectiveWinner = homeCode;
+      else if (predAway > predHome) effectiveWinner = awayCode;
+      else if (predPenHome !== null && predPenAway !== null) {
+        if (predPenHome > predPenAway) effectiveWinner = homeCode;
+        else if (predPenAway > predPenHome) effectiveWinner = awayCode;
+      }
+    }
+    const body = { match_id: matchId, pred_home: predHome, pred_away: predAway, pred_winner: effectiveWinner, pred_pen_home: predPenHome, pred_pen_away: predPenAway };
+    try {
+      await this.api('/predictions', { method: 'POST', body: JSON.stringify(body) });
+      const prevWinner = this.predictions[matchId]?.pred_winner;
+      this.predictions[matchId] = { ...this.predictions[matchId], ...body };
+      this.koTeams = await this.api('/predictions/ko-teams');
+      if (homeInput) { homeInput.style.borderColor = 'var(--color-success)'; setTimeout(() => homeInput.style.borderColor = '', 800); }
+      // Re-renderizar para propagar el ganador a la siguiente ronda (cascada).
+      // Se hace cuando el ganador de este partido CAMBIA y alimenta una ronda posterior,
+      // preservando la posición de scroll para no desorientar al usuario.
+      const winnerChanged = prevWinner !== effectiveWinner;
+      const feedsNextRound = matchId !== 'FINAL' && matchId !== 'TP';
+      if (winnerChanged && feedsNextRound) {
+        // Defer breve: si el usuario saltó a otro input de la misma ronda, no interrumpir.
+        // Re-renderizamos solo cuando el foco ya no está en un input de predicción KO.
+        setTimeout(() => {
+          const active = document.activeElement;
+          const stillEditing = active && (active.classList?.contains('ko-score') || active.classList?.contains('ko-pen'));
+          if (!stillEditing) {
+            const scrollY = window.scrollY;
+            this.renderKnockout(main).then(() => window.scrollTo(0, scrollY));
+          }
+        }, 150);
+      }
+    } catch (e) {
+      if (homeInput) homeInput.style.borderColor = 'var(--color-danger)';
+    }
+  },
+
+  // ── PODIO ───────────────────────────────────────────────────────────────────
+
+  async renderPodium(main) {
+    main.innerHTML = '<h2>Podio final</h2><div style="color:var(--color-text-muted)">Cargando...</div>';
+
+    // Cascada de predicciones del usuario (misma lógica que _renderUserKOBracket)
+    const matchById = Object.fromEntries(this.matches.map(m => [m.id, m]));
+    const QF_PAIRS = {'QF-1':['R32-3','R32-5'],'QF-2':['R32-1','R32-4'],'QF-3':['R32-2','R32-6'],'QF-4':['R32-7','R32-8'],'QF-5':['R32-11','R32-12'],'QF-6':['R32-9','R32-10'],'QF-7':['R32-14','R32-16'],'QF-8':['R32-13','R32-15']};
+    const SF_PAIRS = {'SF-1':['QF-1','QF-2'],'SF-2':['QF-5','QF-6'],'SF-3':['QF-3','QF-4'],'SF-4':['QF-7','QF-8'],'SF-5':['SF-1','SF-2'],'SF-6':['SF-3','SF-4']};
+    const preds = this.predictions || {};
+
+    const winnerOf = (matchId, homeCode, awayCode) => {
+      const pred = preds[matchId];
+      if (!pred) return null;
+      const ph = pred.pred_home != null ? parseInt(pred.pred_home) : null;
+      const pa = pred.pred_away != null ? parseInt(pred.pred_away) : null;
+      if (ph != null && pa != null && ph !== pa) return ph > pa ? homeCode : awayCode;
+      return pred.pred_winner || null;
+    };
+
+    const loserOf = (matchId, homeCode, awayCode) => {
+      const w = winnerOf(matchId, homeCode, awayCode);
+      if (!w) return null;
+      return w === homeCode ? awayCode : homeCode;
+    };
+
+    const resolveMatch = (matchId) => {
+      const real = matchById[matchId];
+      if (!real) return { home: null, away: null };
+      if (matchId.startsWith('R32')) return { home: real.home_team || null, away: real.away_team || null };
+      if (matchId === 'TP') {
+        const ra = resolveMatch('SF-5'), rb = resolveMatch('SF-6');
+        return { home: loserOf('SF-5', ra.home, ra.away), away: loserOf('SF-6', rb.home, rb.away) };
+      }
+      const pair = QF_PAIRS[matchId] || SF_PAIRS[matchId] || (matchId === 'FINAL' ? ['SF-5','SF-6'] : null);
+      if (!pair) return { home: null, away: null };
+      const [a, b] = pair;
+      const ra = resolveMatch(a), rb = resolveMatch(b);
+      // Solo predicciones del usuario — nunca equipos reales propagados
+      return { home: winnerOf(a, ra.home, ra.away), away: winnerOf(b, rb.home, rb.away) };
+    };
+
+    // Podio pronosticado por el usuario (desde la cascada)
+    const finalRes = resolveMatch('FINAL');
+    const tpRes    = resolveMatch('TP');
+    const myChampCode  = winnerOf('FINAL', finalRes.home, finalRes.away);
+    const myRunUpCode  = loserOf ('FINAL', finalRes.home, finalRes.away);
+    const myThirdCode  = winnerOf('TP',    tpRes.home,    tpRes.away);
+
+    const myChampion   = myChampCode  ? this.teamByCode(myChampCode)  : null;
+    const myRunnerUp   = myRunUpCode  ? this.teamByCode(myRunUpCode)  : null;
+    const myThirdPlace = myThirdCode  ? this.teamByCode(myThirdCode)  : null;
+
+    // Podio real (resultados cargados por el admin)
+    const finalMatch = matchById['FINAL'];
+    const tpMatch    = matchById['TP'];
+    let realChampion = null, realRunnerUp = null, realThirdPlace = null;
+    if (finalMatch?.winner) {
+      realChampion = this.teamByCode(finalMatch.winner);
+      const loserCode = finalMatch.winner === finalMatch.home_team ? finalMatch.away_team : finalMatch.home_team;
+      realRunnerUp = loserCode ? this.teamByCode(loserCode) : null;
+    }
+    if (tpMatch?.winner) realThirdPlace = this.teamByCode(tpMatch.winner);
+
+    // ¿El usuario llegó a pronosticar la final y el 3er puesto?
+    const hasFinalPred = !!myChampion;
+    const hasTPPred    = !!myThirdPlace;
+
+    const teamCard = (medal, label, team, hint, isMatch) => team ? `
+      <div class="podium-slot">
+        <span class="podium-medal">${medal}</span>
+        <span class="podium-label">${label}</span>
+        <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--color-surface-2);border-radius:var(--radius-md);font-size:15px;font-weight:500;${isMatch ? 'border:1px solid var(--color-success)' : ''}">
+          <span style="font-size:22px">${team.flag || ''}</span>
+          <span>${team.name}</span>
+          ${isMatch ? '<span style="margin-left:auto;color:var(--color-success);font-size:18px">✓</span>' : ''}
+        </div>
+      </div>` : `
+      <div class="podium-slot">
+        <span class="podium-medal">${medal}</span>
+        <span class="podium-label">${label}</span>
+        <div style="padding:10px 14px;background:var(--color-surface-2);border-radius:var(--radius-md);font-size:13px;color:var(--color-text-muted);font-style:italic">${hint}</div>
+      </div>`;
+
+    main.innerHTML = `
+      <h2>Podio final</h2>
+      <div class="notice">Tu podio pronosticado se deriva automáticamente de tu bracket — el campeón, el subcampeón y el tercer lugar que elegiste.</div>
+
+      <h3 style="margin-top:24px;margin-bottom:12px;font-size:16px;color:var(--color-primary)">🔮 Tu podio pronosticado</h3>
+      <div class="card">
+        ${teamCard('🥇', 'Campeón', myChampion, 'Completa tu bracket hasta la Gran Final',
+            myChampion && realChampion && myChampion.code === realChampion.code)}
+        ${teamCard('🥈', 'Subcampeón', myRunnerUp, 'Completa tu bracket hasta la Gran Final',
+            myRunnerUp && realRunnerUp && myRunnerUp.code === realRunnerUp.code)}
+        ${teamCard('🥉', 'Tercer lugar', myThirdPlace, 'Completa tu bracket hasta el 3er puesto',
+            myThirdPlace && realThirdPlace && myThirdPlace.code === realThirdPlace.code)}
+      </div>
+
+      <h3 style="margin-top:24px;margin-bottom:12px;font-size:16px;color:var(--color-primary)">🏆 Podio real</h3>
+      <div class="card">
+        ${teamCard('🥇', 'Campeón real', realChampion, 'Pendiente — falta resultado de la Final', false)}
+        ${teamCard('🥈', 'Subcampeón real', realRunnerUp, 'Pendiente — falta resultado de la Final', false)}
+        ${teamCard('🥉', 'Tercer lugar real', realThirdPlace, 'Pendiente — falta resultado del 3er puesto', false)}
+      </div>
+    `;
+  },
+
+  // ── MINI-POLLAS ─────────────────────────────────────────────────────────────
+
+  async renderMiniPollas(main) {
+    main.innerHTML = `<h2>Mini-Pronósticos</h2><div style="color:var(--color-text-muted)">Cargando...</div>`;
+    try {
+      const status = await this.api('/mini-polla/status');
+      const phaseIcons = { r16: '⚽', qf: '🏅', sf_qf: '🏆', sf_sf: '🌟' };
+
+      let html = `<h2>Mini-Pronósticos</h2>
+        <div class="notice">Pronósticos independientes por fase eliminatoria. Puedes unirte aunque no hayas participado en el pronóstico general. Cada una tiene su propio pozo y ranking. Reparto: <strong>70% primero · 30% segundo</strong>.</div>`;
+
+      for (const [phase, info] of Object.entries(status)) {
+        const statusLabels = {
+          upcoming: { text: 'Próximamente', color: 'var(--color-text-muted)', chip: 'unpaid' },
+          open:     { text: 'Abierta',      color: 'var(--color-success)',    chip: 'paid' },
+          locked:   { text: 'Cerrada',      color: 'var(--color-danger)',     chip: 'unpaid' },
+          finished: { text: 'Finalizada',   color: 'var(--color-text-muted)', chip: 'default' }
+        };
+        const sl = statusLabels[info.status] || statusLabels.upcoming;
+
+        html += `
+          <div class="card" style="margin-bottom:12px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+              <div>
+                <div style="font-size:16px;font-weight:600">${phaseIcons[phase]} ${info.label}</div>
+                <div style="font-size:12px;color:var(--color-text-muted);margin-top:2px">
+                  Inscripción: <strong>$${info.fee}</strong> · Inscritos: <strong>${info.totalRegistered}</strong> · Pozo: <strong>$${info.pot.toFixed(0)}</strong>
+                </div>
+              </div>
+              <span class="chip ${sl.chip}" style="color:${sl.color}">${sl.text}</span>
+            </div>`;
+
+        if (info.status === 'upcoming') {
+          html += `<div style="font-size:13px;color:var(--color-text-muted);font-style:italic">Se abre cuando termine la fase anterior.</div>`;
+        } else if (info.status === 'open' && !info.registered) {
+          html += `<button class="btn-primary" style="width:auto" onclick="app.registerMiniPolla('${phase}')">Inscribirme — $${info.fee}</button>`;
+        } else if (info.status === 'open' && info.registered) {
+          html += `<div style="font-size:13px;color:var(--color-success);margin-bottom:10px">✓ Estás inscrito${info.paid ? ' · Pago confirmado' : ' · Pendiente de pago'}</div>`;
+          html += `<button class="btn-primary" style="width:auto" onclick="app.navigateMiniPolla('${phase}')">Ver partidos y pronosticar</button>`;
+        } else if ((info.status === 'locked' || info.status === 'finished') && info.registered) {
+          html += `<button class="btn-primary" style="width:auto;margin-right:8px" onclick="app.navigateMiniPolla('${phase}')">Ver mis pronósticos</button>`;
+          html += `<button class="btn-sm btn-ghost" onclick="app.showMiniPollaLeaderboard('${phase}')">Ver ranking</button>`;
+        } else if (info.status === 'locked' || info.status === 'finished') {
+          html += `<div style="font-size:13px;color:var(--color-text-muted)">No participaste en este mini-pronóstico.</div>`;
+          if (info.status === 'finished') {
+            html += `<button class="btn-sm btn-ghost" style="margin-top:8px" onclick="app.showMiniPollaLeaderboard('${phase}')">Ver ranking</button>`;
+          }
+        }
+        html += `</div>`;
+      }
+      main.innerHTML = html;
+    } catch (e) {
+      main.innerHTML = `<h2>Mini-Pronósticos</h2><div class="empty-state">Error: ${e.message}</div>`;
+    }
+  },
+
+  async registerMiniPolla(phase) {
+    try {
+      await this.api(`/mini-polla/${phase}/register`, { method: 'POST' });
+      this.navigate('minipollas');
+    } catch (e) { alert('Error: ' + e.message); }
+  },
+
+  async navigateMiniPolla(phase) {
+    const main = document.getElementById('main-content');
+    main.innerHTML = `<div style="color:var(--color-text-muted)">Cargando partidos...</div>`;
+    try {
+      const matches = await this.api(`/mini-polla/${phase}/matches`);
+      const status = await this.api('/mini-polla/status');
+      const phaseInfo = status[phase];
+      const locked = phaseInfo.status === 'locked' || phaseInfo.status === 'finished';
+      const phaseLabels = { r16: 'Dieciseisavos de final', qf: 'Octavos de final', sf_qf: 'Cuartos de final', sf_sf: 'Semifinales + Final' };
+
+      let html = `
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+          <button class="btn-sm btn-ghost" onclick="app.navigate('minipollas')">← Volver</button>
+          <h2 style="margin:0">Mini-Pronóstico: ${phaseLabels[phase]}</h2>
+        </div>
+        <div class="notice">Pronósticos independientes del pronóstico general. Los equipos son los clasificados reales.
+          ${locked ? '<strong>Esta fase está cerrada.</strong>' : '<strong>Predice de arriba hacia abajo y guarda.</strong>'}
+        </div>
+      `;
+
+      matches.forEach(m => {
+        const pred = m.myPred || {};
+        const predHome = pred.pred_home ?? '';
+        const predAway = pred.pred_away ?? '';
+        const predPenHome = pred.pred_pen_home ?? '';
+        const predPenAway = pred.pred_pen_away ?? '';
+        const isDraw = predHome !== '' && predAway !== '' && parseInt(predHome) === parseInt(predAway);
+        const timeStr = m.match_time ? `${m.match_date} · ${m.match_time} (ECU)` : m.match_date || '';
+
+        let autoWinner = null;
+        if (predHome !== '' && predAway !== '') {
+          const h = parseInt(predHome), a = parseInt(predAway);
+          if (h > a) autoWinner = { flag: m.home_flag, name: m.home_name, code: m.home_team };
+          else if (a > h) autoWinner = { flag: m.away_flag, name: m.away_name, code: m.away_team };
+          else if (predPenHome !== '' && predPenAway !== '') {
+            const ph = parseInt(predPenHome), pa = parseInt(predPenAway);
+            if (ph > pa) autoWinner = { flag: m.home_flag, name: m.home_name, code: m.home_team };
+            else if (pa > ph) autoWinner = { flag: m.away_flag, name: m.away_name, code: m.away_team };
+          }
+        }
+
+        html += `
+          <div class="card" style="margin-bottom:8px" data-mp-match="${m.id}" data-mp-phase="${phase}" data-home-code="${m.home_team || ''}" data-away-code="${m.away_team || ''}">
+            <div style="font-size:12px;color:var(--color-text-muted);margin-bottom:8px">${m.label || ''} · ${timeStr}</div>
+            ${m.home_team ? `
+            <div class="match-grid" style="margin-bottom:${isDraw ? '8px' : '0'}">
+              <div class="team-cell">
+                <span class="team-flag">${m.home_flag || '?'}</span>
+                <span class="team-name">${m.home_name || m.home_team}</span>
+              </div>
+              <div class="score-inputs">
+                <input type="number" min="0" max="20" class="score-input mp-score" data-match="${m.id}" data-field="home" value="${predHome}" ${locked ? 'disabled' : ''} placeholder="—">
+                <span class="score-separator">—</span>
+                <input type="number" min="0" max="20" class="score-input mp-score" data-match="${m.id}" data-field="away" value="${predAway}" ${locked ? 'disabled' : ''} placeholder="—">
+              </div>
+              <div class="team-cell away">
+                <span class="team-name">${m.away_name || m.away_team}</span>
+                <span class="team-flag">${m.away_flag || '?'}</span>
+              </div>
+            </div>` : `<div style="font-size:13px;color:var(--color-text-muted);font-style:italic">Equipos pendientes</div>`}
+            <div class="mp-pen-section" style="${isDraw ? '' : 'display:none'}">
+              <div style="font-size:12px;color:var(--color-text-muted);margin:8px 0 6px">⚖️ Empate — ingresa el marcador en penales:</div>
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                <span style="font-size:13px;font-weight:500">${m.home_flag || ''} ${m.home_name || ''}</span>
+                <input type="number" min="0" max="30" class="score-input mp-pen" data-match="${m.id}" data-field="pen_home" value="${predPenHome}" ${locked ? 'disabled' : ''} placeholder="—" style="width:44px;text-align:center">
+                <span class="score-separator">—</span>
+                <input type="number" min="0" max="30" class="score-input mp-pen" data-match="${m.id}" data-field="pen_away" value="${predPenAway}" ${locked ? 'disabled' : ''} placeholder="—" style="width:44px;text-align:center">
+                <span style="font-size:13px;font-weight:500">${m.away_name || ''} ${m.away_flag || ''}</span>
+              </div>
+            </div>
+            ${autoWinner ? `<div style="margin-top:8px;font-size:12px;color:var(--color-success);font-weight:500">✓ Avanza: ${autoWinner.flag || ''} ${autoWinner.name}${isDraw ? ' (por penales)' : ''}</div>` : ''}
+            ${m.home_score != null ? `
+            <div style="margin-top:8px;font-size:12px;color:var(--color-text-muted);border-top:1px solid var(--color-border);padding-top:8px">
+              Resultado real: <strong>${m.home_score}–${m.away_score}</strong>
+              ${m.pen_home != null ? `· Penales: <strong>${m.pen_home}–${m.pen_away}</strong>` : ''}
+            </div>` : ''}
+          </div>
+        `;
+      });
+
+      if (!locked) {
+        html += `<div class="save-bar">
+          <span class="success-msg" id="mp-save-msg"></span>
+          <button class="btn-primary" style="width:auto;margin:0" onclick="app.saveAllMPPreds('${phase}')">Guardar todas</button>
+        </div>`;
+      }
+
+      main.innerHTML = html;
+
+      if (!locked) {
+        main.querySelectorAll('.mp-score').forEach(input => {
+          input.addEventListener('input', () => {
+            const card = input.closest('[data-mp-match]');
+            if (!card) return;
+            const hVal = card.querySelector('.mp-score[data-field="home"]')?.value;
+            const aVal = card.querySelector('.mp-score[data-field="away"]')?.value;
+            const penSection = card.querySelector('.mp-pen-section');
+            if (!penSection) return;
+            const drawNow = hVal !== '' && aVal !== '' && parseInt(hVal) === parseInt(aVal);
+            penSection.style.display = drawNow ? '' : 'none';
+            if (!drawNow) card.querySelectorAll('.mp-pen').forEach(p => { p.value = ''; });
+          });
+          input.addEventListener('blur', () => this.saveMPPrediction(phase, input.dataset.match, main));
+        });
+        main.querySelectorAll('.mp-pen').forEach(input => {
+          input.addEventListener('blur', () => this.saveMPPrediction(phase, input.dataset.match, main));
+        });
+      }
+    } catch (e) {
+      main.innerHTML = `<div class="empty-state">Error: ${e.message}</div>`;
+    }
+  },
+
+  async saveAllMPPreds(phase) {
+    const main = document.getElementById('main-content');
+    const cards = main.querySelectorAll('[data-mp-match]');
+    const msg = document.getElementById('mp-save-msg');
+    let saved = 0;
+    for (const card of cards) {
+      const matchId = card.dataset.mpMatch;
+      if (matchId) { await this.saveMPPrediction(phase, matchId, main); saved++; }
+    }
+    if (msg) { msg.textContent = `${saved} predicciones guardadas.`; setTimeout(() => msg.textContent = '', 3000); }
+  },
+
+  async saveMPPrediction(phase, matchId, main) {
+    const card = main ? main.querySelector(`[data-mp-match="${matchId}"]`) : null;
+    if (!card) return;
+    const homeCode = card.dataset.homeCode || null;
+    const awayCode = card.dataset.awayCode || null;
+    const homeInput = card.querySelector('.mp-score[data-field="home"]');
+    const awayInput = card.querySelector('.mp-score[data-field="away"]');
+    const penHomeInput = card.querySelector('.mp-pen[data-field="pen_home"]');
+    const penAwayInput = card.querySelector('.mp-pen[data-field="pen_away"]');
+    const predHome = homeInput?.value !== '' ? parseInt(homeInput.value) : null;
+    const predAway = awayInput?.value !== '' ? parseInt(awayInput.value) : null;
+    const predPenHome = penHomeInput?.value !== '' ? parseInt(penHomeInput.value) : null;
+    const predPenAway = penAwayInput?.value !== '' ? parseInt(penAwayInput.value) : null;
+    let effectiveWinner = null;
+    if (predHome !== null && predAway !== null) {
+      if (predHome > predAway) effectiveWinner = homeCode;
+      else if (predAway > predHome) effectiveWinner = awayCode;
+      else if (predPenHome !== null && predPenAway !== null) {
+        if (predPenHome > predPenAway) effectiveWinner = homeCode;
+        else if (predPenAway > predPenHome) effectiveWinner = awayCode;
+      }
+    }
+    const body = { match_id: matchId, pred_home: predHome, pred_away: predAway, pred_winner: effectiveWinner, pred_pen_home: predPenHome, pred_pen_away: predPenAway };
+    try {
+      await this.api(`/mini-polla/${phase}/predictions`, { method: 'POST', body: JSON.stringify(body) });
+      if (homeInput) { homeInput.style.borderColor = 'var(--color-success)'; setTimeout(() => homeInput.style.borderColor = '', 800); }
+    } catch (e) {
+      if (homeInput) homeInput.style.borderColor = 'var(--color-danger)';
+    }
+  },
+
+  async showMiniPollaLeaderboard(phase) {
+    const main = document.getElementById('main-content');
+    main.innerHTML = `<div style="color:var(--color-text-muted)">Cargando ranking...</div>`;
+    try {
+      const data = await this.api(`/mini-polla/${phase}/leaderboard`);
+      const { leaderboard, totalPot } = data;
+      const prize1 = (totalPot * 0.7).toFixed(2);
+      const prize2 = (totalPot * 0.3).toFixed(2);
+
+      main.innerHTML = `
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+          <button class="btn-sm btn-ghost" onclick="app.navigate('minipollas')">← Volver</button>
+          <h2 style="margin:0">Ranking · ${data.label}</h2>
+        </div>
+        <div class="grid-2" style="margin-bottom:1rem">
+          <div class="metric-card"><div class="metric-label">Inscritos</div><div class="metric-value">${leaderboard.length}</div></div>
+          <div class="metric-card"><div class="metric-label">Pozo total</div><div class="metric-value">$${totalPot.toFixed(0)}</div></div>
+          <div class="metric-card"><div class="metric-label">🥇 Premio 1ro</div><div class="metric-value">$${prize1}</div></div>
+          <div class="metric-card"><div class="metric-label">🥈 Premio 2do</div><div class="metric-value">$${prize2}</div></div>
+        </div>
+        <table class="leaderboard-table">
+          <thead><tr><th>#</th><th>Participante</th><th style="text-align:center">Aciertos</th><th style="text-align:center">Exactos</th><th style="text-align:right">Puntos</th></tr></thead>
+          <tbody>
+            ${leaderboard.map((u, i) => {
+              const rank = i + 1;
+              const medal = rank===1?'gold':rank===2?'silver':rank===3?'bronze':'default';
+              const init = u.display_name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+              const isMe = u.user_id === this.user.id;
+              return `<tr style="${isMe ? 'background:rgba(24,95,165,0.08)' : ''}">
+                <td><span class="rank-medal ${medal}">${rank}</span></td>
+                <td class="user-cell"><span class="avatar">${init}</span><span>${u.display_name}${isMe ? ' <strong>(tú)</strong>' : ''}${u.paid ? '' : '<span class="chip unpaid">sin pago</span>'}</span></td>
+                <td style="text-align:center">${u.correct}</td>
+                <td style="text-align:center">${u.exact}</td>
+                <td style="text-align:right;font-weight:700">${u.points}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      `;
+    } catch (e) {
+      main.innerHTML = `<div class="empty-state">Error: ${e.message}</div>`;
+    }
+  },
+
+  // ── RANKING ─────────────────────────────────────────────────────────────────
+
+  async renderLeaderboard(main) {
+    main.innerHTML = '<h2>Ranking</h2><div style="color:var(--color-text-muted)">Cargando...</div>';
+    try {
+      const [lb1, lb2, dailyGroups, dailyKO] = await Promise.all([
+        this.api('/leaderboard/groups'),
+        this.api('/leaderboard/knockout'),
+        this.api('/leaderboard/daily-top?phase=groups').catch(() => null),
+        this.api('/leaderboard/daily-top?phase=knockout').catch(() => null)
+      ]);
+
+      // Detección automática de fase activa (genérico, sin hardcodear)
+      const activePhase = this.getActivePhase(); // 'finals' o 'groups'
+      const defaultTab = activePhase === 'finals' ? 'knockout' : 'groups';
+
+      // GJ por fase
+      const gjGroupsIds = new Set((dailyGroups?.gjIds) || []);
+      const gjKOIds = new Set((dailyKO?.gjIds) || []);
+
+      const renderDailyTop = (daily, phase) => {
+        if (!daily?.hasData || !daily.top.length) return '';
+        const date = daily.date ? new Date(daily.date + 'T12:00:00').toLocaleDateString('es-EC', { weekday:'long', day:'numeric', month:'long' }) : '';
+        const winMedals = ['🥇','🥈','🥉'];
+        const loseMedals = ['😰','😓','😔'];
+        const winners = daily.top.map((u, i) => `
+          <div style="display:flex;align-items:center;gap:5px;font-size:11px;padding:2px 0">
+            <span>${winMedals[i]}</span>
+            <span style="font-weight:600">${u.display_name.split(' ')[0]}</span>
+            <span style="font-weight:700;color:var(--color-primary)">${u.pts}pts</span>
+            ${u.exactos > 0 ? `<span style="color:var(--color-text-muted);font-size:10px">🎯${u.exactos}</span>` : ''}
+            ${u.isGJ ? '<span style="color:#C9A84C;font-size:10px;font-weight:700">⭐GJ</span>' : ''}
+          </div>`).join('');
+        const losers = (daily.bottom || []).map((u, i) => `
+          <div style="display:flex;align-items:center;gap:5px;font-size:11px;padding:2px 0">
+            <span>${loseMedals[i]}</span>
+            <span style="font-weight:600;color:var(--color-text-muted)">${u.display_name.split(' ')[0]}</span>
+            <span style="font-weight:700;color:var(--color-text-muted)">${u.pts}pts</span>
+          </div>`).join('');
+        return `
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
+            <div style="padding:8px 10px;background:var(--color-surface);border:1px solid rgba(201,168,76,0.2);border-radius:8px">
+              <div style="font-size:10px;font-weight:700;color:#C9A84C;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:5px">⭐ Jornada anterior · ${date}</div>
+              ${winners}
+            </div>
+            <div style="padding:8px 10px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:8px">
+              <div style="font-size:10px;font-weight:700;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:5px">🔒 El Calabozo</div>
+              ${losers || '<div style="font-size:11px;color:var(--color-text-muted)">Sin datos</div>'}
+            </div>
+          </div>`;
+      };
+
+      const renderTable = (data, phase) => {
+        const { leaderboard, totalPot, prizes, splits } = data;
+        const gjIds = phase === 'knockout' ? gjKOIds : gjGroupsIds;
+        const sp = splits || { first: 70, second: 25, third: 5 };
+        if (!leaderboard.length) return `
+          <div style="font-size:13px;color:var(--color-text-muted);font-style:italic;padding:8px 0">
+            Aún no hay participantes con pago confirmado.
+          </div>`;
+        return `
+          <div class="grid-2" style="margin-bottom:1rem">
+            <div class="metric-card"><div class="metric-label">Participantes</div><div class="metric-value">${leaderboard.length}</div></div>
+            <div class="metric-card"><div class="metric-label">Pozo neto</div><div class="metric-value">$${totalPot.toFixed(0)}</div></div>
+            <div class="metric-card"><div class="metric-label">🥇 Premio 1ro <small style="font-size:10px">(${sp.first}%)</small></div><div class="metric-value" style="color:var(--color-primary)">$${prizes.first.toFixed(2)}</div></div>
+            <div class="metric-card"><div class="metric-label">🥈 Premio 2do <small style="font-size:10px">(${sp.second}%)</small></div><div class="metric-value">$${prizes.second.toFixed(2)}</div></div>
+            <div class="metric-card"><div class="metric-label">🥉 Premio 3ro <small style="font-size:10px">(${sp.third}%)</small></div><div class="metric-value">$${prizes.third.toFixed(2)}</div></div>
+          </div>
+          <div style="overflow-x:auto">
+          <table class="leaderboard-table">
+            <thead><tr>
+              <th>#</th><th>Participante</th>
+              <th style="text-align:center" title="Marcador exacto">🎯 Exacto</th>
+              <th style="text-align:center" title="Ganador + diferencia">📏 G+Dif</th>
+              <th style="text-align:center" title="Solo ganador">✅ Ganador</th>
+              <th style="text-align:right">Puntos</th>
+            </tr></thead>
+            <tbody>
+              ${leaderboard.map((u, i) => {
+                const rank = i + 1;
+                const medal = rank===1?'gold':rank===2?'silver':rank===3?'bronze':'default';
+                const init = u.display_name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+                const isMe = u.user_id === this.user.id || u.id === this.user.id;
+                const uid = u.user_id || u.id;
+                this._lbNames = this._lbNames || {};
+                this._lbNames[uid] = u.display_name;
+                const ex = u.exactScores ?? u.exact ?? 0;
+                const df = u.diffCount ?? 0;
+                const wn = u.winnerCount ?? 0;
+                const gjBadge = gjIds.has(uid) ? ' <span title="Ganador de la Jornada" style="font-size:11px;background:rgba(201,168,76,0.15);color:#C9A84C;border:1px solid rgba(201,168,76,0.3);border-radius:10px;padding:1px 6px;margin-left:4px">⭐ GJ</span>' : '';
+                // Botones exclusivos por fase
+                const cmpBtn = uid !== this.user.id ? `<button title="Compararme" onclick="app.showCompare(${uid},'${u.display_name.replace(/'/g,"\\'")}','${phase}')" style="margin-left:6px;font-size:12px;padding:2px 8px;border:1px solid rgba(201,168,76,0.4);border-radius:6px;background:transparent;color:#C9A84C;cursor:pointer;flex-shrink:0">⚔️</button>` : '';
+                const eyeBtn = `<button title="Ver pronósticos" onclick="app.showUserPredictions(${uid},'${phase}')" style="margin-left:4px;font-size:12px;padding:2px 8px;border:1px solid var(--color-border);border-radius:6px;background:transparent;color:var(--color-text-muted);cursor:pointer;flex-shrink:0">👁</button>`;
+                const verBtn = `<button title="Ver detalle de puntos" onclick="app.showPointsBreakdown(${uid},'${u.display_name.replace(/'/g, "\\'")}','${phase}')" style="margin-left:6px;font-size:11px;padding:2px 7px;border:1px solid var(--color-border);border-radius:6px;background:transparent;color:var(--color-text-muted);cursor:pointer;vertical-align:middle">Ver</button>`;
+                return `<tr style="${isMe ? 'background:rgba(201,168,76,0.06)' : ''}">
+                  <td><span class="rank-medal ${medal}">${rank}</span></td>
+                  <td class="user-cell"><span class="avatar">${init}</span><span>${u.display_name}${isMe ? ' <strong>(tú)</strong>' : ''}${gjBadge}</span>${cmpBtn}${eyeBtn}</td>
+                  <td style="text-align:center;font-weight:600;color:var(--color-primary)">${ex}</td>
+                  <td style="text-align:center">${df}</td>
+                  <td style="text-align:center">${wn}</td>
+                  <td style="text-align:right">
+                    <span style="font-weight:700;font-size:15px">${u.points}</span>
+                    ${verBtn}
+                  </td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+          </div>
+          <div style="font-size:10px;color:var(--color-text-muted);margin-top:6px;padding:0 4px">
+            🎯 Exacto = 5 pts · 📏 G+Dif = 3 pts · ✅ Ganador = 2 pts
+          </div>`;
+      };
+
+      // Tarjeta personal + estado del campeonato (solo eliminatorias)
+      const renderMyStanding = (data) => {
+        const lb = data.leaderboard || [];
+        if (!lb.length) return '';
+        const myIdx = lb.findIndex(u => (u.user_id || u.id) === this.user.id);
+        const cs = data.championStatus;
+
+        // Banner de campeonato asegurado (se muestra a todos cuando aplica)
+        let banner = '';
+        if (cs && cs.locked && cs.leaderName) {
+          const first = cs.leaderName.split(' ')[0];
+          banner = `<div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:linear-gradient(135deg,rgba(201,168,76,0.18),rgba(201,168,76,0.06));border:1px solid rgba(201,168,76,0.35);border-radius:10px;margin-bottom:10px">
+            <span style="font-size:20px">🔒</span>
+            <span style="font-size:13px"><strong style="color:#C9A84C">${first}</strong> ya aseguró matemáticamente el <strong>1er lugar</strong> 🏆</span>
+          </div>`;
+        }
+
+        // Si el usuario no está inscrito en eliminatorias, solo el banner
+        if (myIdx < 0) return banner;
+
+        const me = lb[myIdx];
+        const pos = myIdx + 1;
+        const p1 = lb[0]?.points ?? 0;
+        const p2 = lb[1]?.points ?? 0;
+        const p3 = lb[2]?.points ?? 0;
+        const p4 = lb[3]?.points;
+
+        // Mensaje positivo según lo que aún está en juego (Opción A: sin lenguaje negativo)
+        // El 1er lugar usa el cálculo RIGUROSO (canBeChampion); el top-3 usa una
+        // estimación más simple (su máximo teórico vs el 4to puesto actual).
+        let nudge, nudgeColor;
+        if (me.canBeChampion) { nudge = '🔥 Todavía puedes llegar al 1er lugar'; nudgeColor = '#C9A84C'; }
+        else if (p4 == null || me.maxPossible > p4) { nudge = '💪 Sigues en la pelea por un puesto de premio'; nudgeColor = '#4ade80'; }
+        else { nudge = '🎮 Sigues sumando — juega por escalar posiciones'; nudgeColor = 'var(--color-text-muted)'; }
+
+        const posMedal = pos === 1 ? '🥇' : pos === 2 ? '🥈' : pos === 3 ? '🥉' : `${pos}º`;
+
+        return `${banner}
+          <div style="padding:12px 14px;background:var(--color-surface);border:1px solid rgba(201,168,76,0.25);border-radius:10px;margin-bottom:12px">
+            <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+              <div style="display:flex;align-items:center;gap:14px">
+                <div style="text-align:center">
+                  <div style="font-size:10px;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:0.5px">Tu posición</div>
+                  <div style="font-size:22px;font-weight:800;color:var(--color-primary)">${posMedal}</div>
+                </div>
+                <div style="height:32px;width:1px;background:var(--color-border)"></div>
+                <div>
+                  <div style="font-size:10px;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:0.5px">Tus puntos</div>
+                  <div style="font-size:18px;font-weight:700">${me.points}</div>
+                </div>
+                <div style="height:32px;width:1px;background:var(--color-border)"></div>
+                <div>
+                  <div style="font-size:10px;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:0.5px" title="Lo máximo que podrías sumar si aciertas todo lo que te queda vivo">Tu máximo posible</div>
+                  <div style="font-size:18px;font-weight:700;color:#4ade80">${me.maxPossible}</div>
+                </div>
+              </div>
+              <div style="font-size:12px;font-weight:600;color:${nudgeColor}">${nudge}</div>
+            </div>
+            <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--color-border);display:flex;align-items:center;gap:16px;flex-wrap:wrap;font-size:12px">
+              <span style="color:var(--color-text-muted);font-size:11px">Puestos con premio (puntos hoy):</span>
+              <span>🥇 1º: <strong>${p1}</strong></span>
+              <span>🥈 2º: <strong>${p2}</strong></span>
+              <span>🥉 3º: <strong>${p3}</strong></span>
+            </div>
+          </div>`;
+      };
+
+      // Orden de tabs según fase activa — genérico para cualquier torneo
+      const tabs = defaultTab === 'knockout'
+        ? [['knockout','🏆 Eliminatorias'], ['groups','⚽ Fase de Grupos'], ['today','📅 Apuestas de hoy']]
+        : [['groups','⚽ Fase de Grupos'], ['knockout','🏆 Eliminatorias'], ['today','📅 Apuestas de hoy']];
+
+      main.innerHTML = `
+        <h2>Ranking</h2>
+        <div id="rank-daily-top-wrapper"></div>
+        <div style="display:flex;gap:4px;margin-bottom:1rem;flex-wrap:wrap">
+          ${tabs.map(([id, label]) => `<button class="fixture-tab ${id === defaultTab ? 'active' : ''}" id="rank-tab-${id}" onclick="app.switchRankTab('${id}')">${label}</button>`).join('')}
+        </div>
+        <style>
+          .fixture-tab { padding:7px 18px; border-radius:var(--radius-md); font-size:13px; font-weight:600; cursor:pointer; border:1px solid var(--color-border); background:transparent; color:var(--color-text-muted); font-family:inherit; transition:all 0.2s; }
+          .fixture-tab.active { background:var(--gold-gradient); color:#1A1200; border-color:transparent; box-shadow:0 2px 8px rgba(201,168,76,0.25); }
+        </style>
+        <div id="rank-content-groups" style="${defaultTab !== 'groups' ? 'display:none' : ''}">
+          ${renderDailyTop(dailyGroups, 'groups')}
+          <div class="notice" style="margin-bottom:1rem">Solo participan usuarios con <strong>pago confirmado</strong>.</div>
+          ${renderTable(lb1, 'groups')}
+        </div>
+        <div id="rank-content-knockout" style="${defaultTab !== 'knockout' ? 'display:none' : ''}">
+          ${renderDailyTop(dailyKO, 'knockout')}
+          ${renderMyStanding(lb2)}
+          <div class="notice" style="margin-bottom:1rem">Solo participan usuarios con <strong>pago confirmado</strong>.</div>
+          ${renderTable(lb2, 'knockout')}
+        </div>
+        <div id="rank-content-today" style="display:${defaultTab === 'today' ? 'block' : 'none'}">
+          <div style="color:var(--color-text-muted);font-size:13px">Cargando...</div>
+        </div>
+      `;
+
+      const me2 = lb2.leaderboard?.find(u => u.user_id === this.user.id);
+      const me1 = lb1.leaderboard?.find(u => u.user_id === this.user.id);
+      if (me1 != null || me2 != null) this.refreshPoints();
+
+    } catch (e) { main.innerHTML = `<div class="empty-state">Error: ${e.message}</div>`; }
+  },
+  switchRankTab(tab) {
+    ['groups','knockout','today'].forEach(t => {
+      document.getElementById(`rank-tab-${t}`)?.classList.toggle('active', t === tab);
+      const c = document.getElementById(`rank-content-${t}`);
+      if (c) c.style.display = t === tab ? 'block' : 'none';
+    });
+    if (tab === 'today') this.renderRankingToday();
+  },
+
+  async renderRankingToday() {
+    const container = document.getElementById('rank-content-today');
+    if (!container) return;
+    container.innerHTML = '<div style="color:var(--color-text-muted);font-size:13px">Cargando...</div>';
+    try {
+      const data = await this.api('/daily-bets/today');
+      if (!data.matches.length) {
+        container.innerHTML = `<div class="empty-state"><div class="empty-state-icon">📅</div><p>No hay partidos hoy (${data.date} hora Ecuador).</p></div>`;
+        return;
+      }
+
+      const resultsMap = {};
+      await Promise.all(
+        data.matches.filter(m => m.home_score != null).map(async m => {
+          try { resultsMap[m.id] = await this.api(`/daily-bets/results/${m.id}`); } catch (e) {}
+        })
+      );
+
+      let html = `<div style="font-size:13px;color:var(--color-text-muted);margin-bottom:12px">Apuestas del día · ${data.date}</div>`;
+
+      data.matches.forEach(m => {
+        const result = resultsMap[m.id];
+        const finished = m.home_score != null;
+        const timeStr = m.match_time ? `${m.match_time} (ECU)` : '';
+
+        let statusHtml = '';
+        if (finished && result?.status === 'finished') {
+          const { potType, totalPot, perWinner, winners, myResult, carried } = result;
+          let potMsg = '', potColor = 'var(--color-text-muted)';
+          if (carried) { potMsg = `⏩ Nadie acertó — pote $${totalPot.toFixed(2)} acumulado`; }
+          else if (potType === 'exacto') { potMsg = `🎯 Exacto — ${winners.length} ganador${winners.length>1?'es':''} · $${perWinner} c/u`; potColor='var(--color-success)'; }
+          else if (potType === 'ganador') { potMsg = `✅ Ganador — ${winners.length} ganador${winners.length>1?'es':''} · $${perWinner} c/u`; potColor='var(--color-success)'; }
+
+          statusHtml = `
+            <div style="margin-top:8px;padding:8px;background:var(--color-surface-2);border-radius:var(--radius-md);font-size:12px">
+              <div style="color:${potColor};margin-bottom:4px">${potMsg}</div>
+              ${myResult ? (myResult.won
+                ? `<div style="color:var(--color-success);font-weight:600">🏆 ¡Ganaste $${myResult.prize}! Tu pronóstico: ${myResult.pred}</div>`
+                : myResult.paid
+                  ? `<div style="color:var(--color-text-muted)">Tu pronóstico: ${myResult.pred} · No ganaste esta vez</div>`
+                  : `<div style="color:var(--color-primary)">⚠️ Tu pronóstico: ${myResult.pred} · Pago pendiente de confirmación</div>`) : ''}
+            </div>`;
+        }
+
+        html += `
+          <div class="card" style="margin-bottom:8px">
+            <div class="match-grid">
+              <div class="team-cell"><span class="team-flag">${m.home_flag||'?'}</span><span class="team-name">${m.home_name||m.home_team}</span></div>
+              <div style="text-align:center;font-size:14px;font-weight:700">
+                ${finished ? `${m.home_score} – ${m.away_score}` : `<span style="color:var(--color-text-muted)">${timeStr}</span>`}
+              </div>
+              <div class="team-cell away"><span class="team-name">${m.away_name||m.away_team}</span><span class="team-flag">${m.away_flag||'?'}</span></div>
+            </div>
+            <div style="font-size:12px;color:var(--color-text-muted);margin-top:4px">
+              Pote: $${(m.pot||0).toFixed(0)} · ${m.totalBets} apuesta${m.totalBets!==1?'s':''}
+            </div>
+            ${statusHtml}
+          </div>`;
+      });
+
+      container.innerHTML = html;
+    } catch (e) {
+      container.innerHTML = `<div style="color:var(--color-danger)">Error: ${e.message}</div>`;
+    }
+  },
+
+// ── REGLAS ──────────────────────────────────────────────────────────────────
+
+  async renderRules(main) {
+    main.innerHTML = '<h2>Reglas y puntuación</h2><div style="color:var(--color-text-muted)">Cargando...</div>';
+    let s = {};
+    try { s = await this.api('/settings'); } catch (e) {}
+
+    const p1fee = s.polla1_fee || 20;
+    const p1maint = s.polla1_maintenance || 1;
+    const p1net = p1fee - p1maint;
+    const p2fee = s.polla2_fee || 20;
+    const p2maint = s.polla2_maintenance || 1;
+    const s1 = s.polla1_split_1st || 70;
+    const s2 = s.polla1_split_2nd || 25;
+    const s3 = s.polla1_split_3rd || 5;
+    const betAmount = s.daily_bet_amount || 2;
+    const feeR16 = s.mini_polla_fee_r16 || 5;
+    const feeQF = s.mini_polla_fee_qf || 3;
+    const feeSFQF = s.mini_polla_fee_sf_qf || 3;
+    const feeSFSF = s.mini_polla_fee_sf_sf || 2;
+
+    main.innerHTML = `
+      <h2>Reglas y puntuación</h2>
+
+      <div class="card">
+        <h3>📋 Reglas</h3>
+        <p style="font-size:14px;color:var(--color-text-muted);line-height:1.9">
+          Hay <strong>dos pronósticos independientes</strong>, cada uno con su propio pozo:
+        </p>
+        <ul style="font-size:14px;color:var(--color-text-muted);line-height:2;margin-top:8px;padding-left:16px">
+          <li><strong>Pronóstico 1 — Fase de Grupos ($${p1fee}):</strong> pronosticas los partidos de la fase de grupos. El pozo se reparte al finalizar los grupos.</li>
+          <li><strong>Pronóstico 2 — Eliminatorias ($${p2fee}):</strong> se abre cuando terminan los grupos. Pronosticas los partidos eliminatorios con los equipos reales clasificados. El pozo se reparte al finalizar el torneo.</li>
+        </ul>
+        <p style="font-size:12px;color:var(--color-text-muted);margin-top:10px;font-style:italic">
+          * $${p1maint} de cada inscripción se destina al mantenimiento de la plataforma. El pozo se calcula sobre $${p1net} por participante pagado.
+        </p>
+      </div>
+
+      <div class="card">
+        <h3>💰 Repartición del pozo</h3>
+        <p style="font-size:14px;color:var(--color-text-muted);line-height:1.8">
+          Solo participan quienes tengan el <strong>pago confirmado</strong>. El pozo neto se reparte así:
+        </p>
+        <ul style="font-size:14px;line-height:2;list-style:none;margin-top:8px">
+          <li>🥇 Primer lugar: <strong>${s1}%</strong></li>
+          <li>🥈 Segundo lugar: <strong>${s2}%</strong></li>
+          <li>🥉 Tercer lugar: <strong>${s3}%</strong></li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h3>⏱️ Cierre de predicciones</h3>
+        <p style="font-size:14px;color:var(--color-text-muted);line-height:1.8">
+          Las predicciones de <strong>grupos</strong> se cierran 5 minutos antes del primer partido del Mundial (11 de junio de 2026, hora Ecuador).
+          Las predicciones de <strong>eliminatorias</strong> se cierran 5 minutos antes del primer partido de dieciseisavos de final.
+          Las <strong>apuestas diarias</strong> se cierran 5 minutos antes de cada partido.
+          Todos los horarios son en hora Ecuador (GMT-5).
+        </p>
+      </div>
+
+      <div class="card">
+        <h3>🌍 Formato FIFA 2026</h3>
+        <p style="font-size:14px;color:var(--color-text-muted);line-height:1.8">
+          48 equipos en 12 grupos de 4. Clasifican los 2 primeros de cada grupo más los 8 mejores terceros, dando 32 equipos en eliminatorias.
+          Fases: Dieciseisavos → Octavos → Cuartos → Semifinales → Final.
+        </p>
+      </div>
+
+      <div class="card">
+        <h3>🔄 Eliminatorias con equipos reales</h3>
+        <p style="font-size:14px;color:var(--color-text-muted);line-height:1.8">
+          En el Pronóstico 2, los equipos de cada partido eliminatorio se basan en los clasificados <strong>reales</strong> de la fase de grupos, no en suposiciones ni predicciones. Es decir, ya conocerás qué equipos avanzaron antes de hacer tu pronóstico.
+        </p>
+      </div>
+
+      <div class="card">
+        <h3>🎯 Puntos · Fase de Grupos</h3>
+        <ul style="font-size:14px;line-height:2;list-style:none">
+          <li>🎯 Marcador exacto: <strong>5 puntos</strong></li>
+          <li>📏 Ganador correcto + diferencia exacta: <strong>3 puntos</strong></li>
+          <li>✅ Solo ganador correcto: <strong>2 puntos</strong></li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h3>🎯 Puntos · Eliminatorias (sin penales)</h3>
+        <ul style="font-size:14px;line-height:2;list-style:none">
+          <li>🎯 Marcador exacto: <strong>5 puntos</strong></li>
+          <li>📏 Ganador correcto + diferencia exacta: <strong>3 puntos</strong></li>
+          <li>✅ Solo ganador correcto: <strong>2 puntos</strong></li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h3>⚡ Puntos · Eliminatorias (con penales)</h3>
+        <ul style="font-size:14px;line-height:2;list-style:none">
+          <li>🏆 Marcador exacto + penales exactos + ganador correcto: <strong>8 puntos</strong></li>
+          <li>🎯 Marcador exacto: <strong>5 puntos</strong></li>
+          <li>👍 Empate correcto + ganador correcto en penales: <strong>3 puntos</strong></li>
+          <li>📏 Ganador correcto + diferencia exacta: <strong>3 puntos</strong></li>
+          <li>✅ Solo ganador correcto: <strong>2 puntos</strong></li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h3>🏅 Podio final</h3>
+        <p style="font-size:13px;color:var(--color-text-muted);margin-bottom:8px">El podio (campeón, subcampeón y tercer lugar) se muestra automáticamente a partir de tus pronósticos de la Gran Final y el Tercer puesto. Es solo una vista comparativa — <strong>no otorga puntos adicionales</strong>; los puntos provienen únicamente de acertar esos partidos en eliminatorias.</p>
+      </div>
+
+      <div class="card">
+        <h3>💵 Apuestas diarias</h3>
+        <p style="font-size:14px;color:var(--color-text-muted);line-height:1.8">
+          Apuesta $${betAmount} por partido del día. Quienes aciertan el marcador exacto se reparten el pote.
+          Si nadie acierta el exacto, se reparte entre quienes acertaron el ganador.
+          Si nadie acierta el ganador, el pote se acumula al siguiente partido.
+          Las apuestas diarias no suman puntos al ranking general.
+        </p>
+      </div>
+
+      <div class="card">
+        <h3>🎮 Mini-Pronósticos</h3>
+        <p style="font-size:14px;color:var(--color-text-muted);line-height:1.8">
+          Al inicio de cada fase eliminatoria se habilita un mini-pronóstico independiente con su propio pozo y ranking.
+          Puedes participar aunque no estés en ningún pronóstico principal.
+          El reparto es 70% al primero y 30% al segundo.
+        </p>
+        <ul style="font-size:13px;color:var(--color-text-muted);line-height:2;margin-top:8px;padding-left:16px">
+          <li>⚽ Dieciseisavos: <strong>$${feeR16}</strong></li>
+          <li>🏅 Octavos de final: <strong>$${feeQF}</strong></li>
+          <li>🏆 Cuartos de final: <strong>$${feeSFQF}</strong></li>
+          <li>🌟 Semifinales + Final: <strong>$${feeSFSF}</strong></li>
+        </ul>
+      </div>
+    `;
+  },
+
+  // ── ADMIN ───────────────────────────────────────────────────────────────────
+
+  async renderAdmin(main) {
+    main.innerHTML = `
+      <h2>Panel de administrador</h2>
+      <div style="display:flex;gap:4px;margin-bottom:1rem;flex-wrap:wrap">
+        <button class="fixture-tab active" id="admin-tab-pollas" onclick="app.switchAdminTab('pollas')">⚙️ Pronósticos</button>
+        <button class="fixture-tab" id="admin-tab-today" onclick="app.switchAdminTab('today')">📅 Hoy</button>
+        <button class="fixture-tab" id="admin-tab-matches" onclick="app.switchAdminTab('matches')">⚽ Resultados</button>
+        <button class="fixture-tab" id="admin-tab-minipollas" onclick="app.switchAdminTab('minipollas')">🎮 Mini-Pronósticos</button>
+        <button class="fixture-tab" id="admin-tab-users" onclick="app.switchAdminTab('users')">👥 Usuarios</button>
+      </div>
+      <style>
+        .fixture-tab { padding:7px 18px; border-radius:var(--radius-md); font-size:13px; font-weight:600; cursor:pointer; border:1px solid var(--color-border); background:transparent; color:var(--color-text-muted); font-family:inherit; transition:all 0.2s; }
+        .fixture-tab.active { background:var(--gold-gradient); color:#1A1200; border-color:transparent; box-shadow:0 2px 8px rgba(201,168,76,0.25); }
+      </style>
+
+      <div id="admin-content-pollas">
+        <div class="card"><h3>⚙️ Configuración de pronósticos</h3><div id="admin-pollas-config"></div></div>
+        <div class="card"><h3>👥 Inscripciones y pagos</h3><div id="admin-pollas-regs"></div></div>
+        <div class="card"><h3>🏅 Podio real</h3><div id="admin-podium"></div></div>
+      </div>
+
+      <div id="admin-content-today" style="display:none">
+        <div class="card"><div id="admin-today-content"><span style="color:var(--color-text-muted);font-size:14px">Cargando...</span></div></div>
+      </div>
+
+      <div id="admin-content-matches" style="display:none">
+        <div class="card"><h3>Cargar resultados</h3><div id="admin-matches"><span style="color:var(--color-text-muted);font-size:14px">Cargando...</span></div></div>
+      </div>
+
+      <div id="admin-content-minipollas" style="display:none">
+        <div class="card"><h3>🎮 Mini-Pronósticos</h3><div id="admin-minipollas"></div></div>
+      </div>
+
+      <div id="admin-content-users" style="display:none">
+        <div class="card"><h3>Participantes</h3><div id="admin-users"></div></div>
+      </div>
+
+      <div style="text-align:center;margin-top:20px;padding-top:12px;border-top:1px solid var(--color-border);font-size:11px;color:var(--color-text-muted)">
+        Polla Mundialista · v${APP_VERSION}
+      </div>
+    `;
+    this.renderAdminPollasConfig();
+    this.renderAdminPollasRegs();
+    this.renderAdminPodium();
+    this.renderAdminTodayBets();
+    this.renderAdminMatches();
+    this.renderAdminMiniPollas();
+    this.renderAdminUsers();
+    // Sincronizar BD existente (datos cargados antes de la propagación automática)
+    this.syncBracketOnce();
+  },
+
+  async syncBracketOnce() {
+    // Solo correr una vez por sesión para no spam
+    if (this._bracketSynced) return;
+    this._bracketSynced = true;
+    try {
+      await this.api('/admin/bracket/propagate', { method: 'POST' });
+      await this.loadData();
+      this.renderAdminMatches();
+      this.renderAdminPodium();
+    } catch (e) {}
+  },
+
+  switchAdminTab(tab) {
+    ['pollas','today','matches','minipollas','users'].forEach(t => {
+      document.getElementById(`admin-tab-${t}`)?.classList.toggle('active', t === tab);
+      const c = document.getElementById(`admin-content-${t}`);
+      if (c) c.style.display = t === tab ? 'block' : 'none';
+    });
+  },
+
+  async renderAdminTodayBets() {
+    const container = document.getElementById('admin-today-content');
+    if (!container) return;
+    try {
+      const [data, settings] = await Promise.all([
+        this.api('/admin/daily-bets/today'),
+        this.api('/settings')
+      ]);
+
+      const currentAmount = settings.daily_bet_amount || 2;
+
+      let html = `
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+          <h3 style="margin:0">Apuestas del día · ${data.date}</h3>
+          <div style="display:flex;align-items:center;gap:8px">
+            <label style="font-size:12px;color:var(--color-text-muted)">Monto apuesta ($):</label>
+            <input type="number" id="daily-amount-input" value="${currentAmount}" min="1" style="width:60px;text-align:center">
+            <button class="btn-sm btn-ghost" onclick="app.saveDailyBetAmount()">Guardar</button>
+            <span class="success-msg" id="daily-amount-msg"></span>
+          </div>
+        </div>`;
+
+      if (!data.matches.length) {
+        html += `<div class="empty-state"><div class="empty-state-icon">📅</div><p>No hay partidos hoy.</p></div>`;
+        container.innerHTML = html;
+        return;
+      }
+
+      data.matches.forEach(m => {
+        const { match, totalBets, paidBets, totalPot, potType, carried, perWinner, winners, bets } = m;
+        const finished = match.home_score != null;
+        const timeStr = match.match_time ? `${match.match_time} (ECU)` : '';
+
+        let statusHtml = '';
+        if (finished) {
+          let potMsg = '', potColor = 'var(--color-text-muted)';
+          if (carried) { potMsg = `⏩ Nadie acertó — pote $${totalPot.toFixed(2)} acumulado`; }
+          else if (potType === 'exacto') { potMsg = `🎯 Exacto — ${winners.length} ganador${winners.length>1?'es':''} · $${perWinner.toFixed(2)} c/u`; potColor='var(--color-success)'; }
+          else if (potType === 'ganador') { potMsg = `✅ Ganador — ${winners.length} ganador${winners.length>1?'es':''} · $${perWinner.toFixed(2)} c/u`; potColor='var(--color-success)'; }
+          statusHtml = `<div style="font-size:12px;color:${potColor};margin:4px 0">${potMsg}</div>`;
+        }
+
+        html += `
+          <div style="margin-bottom:12px;padding:10px;background:var(--color-surface-2);border-radius:var(--radius-md);border:1px solid var(--color-border)">
+            <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:4px;margin-bottom:6px">
+              <div style="font-size:14px;font-weight:600">
+                ${match.home_flag||''} ${match.home_name}
+                ${finished ? `<strong>${match.home_score}–${match.away_score}</strong>` : 'vs'}
+                ${match.away_name} ${match.away_flag||''}
+              </div>
+              <div style="font-size:12px;color:var(--color-text-muted)">
+                ${timeStr} · ${paidBets}/${totalBets} pagados · Pote: $${totalPot.toFixed(2)}
+              </div>
+            </div>
+            ${statusHtml}
+            ${totalBets > 0 ? `
+            <details style="margin-top:6px" open>
+              <summary style="cursor:pointer;font-size:12px;color:var(--color-text-muted);margin-bottom:6px">
+                ${totalBets} pronóstico${totalBets!==1?'s':''}
+              </summary>
+              ${bets.map(b => `
+                <div style="display:flex;align-items:center;gap:8px;font-size:12px;padding:4px 0;border-bottom:1px solid var(--color-border)">
+                  <span style="flex:1;font-weight:${b.won?'700':b.paid?'500':'400'};color:${b.won?'var(--color-success)':b.paid?'var(--color-text)':'var(--color-text-muted)'}">
+                    ${b.display_name}
+                  </span>
+                  <span style="color:var(--color-text-muted)">${b.pred}</span>
+                  <span>$${b.amount}</span>
+                  ${b.won ? '<span class="chip paid">Ganó</span>' : ''}
+                  <span class="chip ${b.paid ? 'paid' : 'unpaid'}">${b.paid ? 'Pagado' : 'Pendiente'}</span>
+                  <button class="btn-sm btn-ghost" onclick="app.toggleDailyBetPaid('${match.id}',${b.user_id},${b.paid})">
+                    ${b.paid ? 'Quitar' : 'Confirmar'}
+                  </button>
+                </div>`).join('')}
+            </details>` : `<div style="font-size:12px;color:var(--color-text-muted)">Sin pronósticos aún</div>`}
+          </div>`;
+      });
+
+      container.innerHTML = html;
+    } catch (e) {
+      container.innerHTML = `<div style="color:var(--color-danger)">Error: ${e.message}</div>`;
+    }
+  },
+
+  async saveDailyBetAmount() {
+    const msg = document.getElementById('daily-amount-msg');
+    const amount = document.getElementById('daily-amount-input')?.value;
+    try {
+      await this.api('/admin/daily-bets/amount', {
+        method: 'PUT',
+        body: JSON.stringify({ amount: parseFloat(amount) })
+      });
+      msg.textContent = '✓ Guardado';
+      setTimeout(() => msg.textContent = '', 2000);
+    } catch (e) { msg.textContent = e.message; msg.style.color = 'var(--color-danger)'; }
+  },
+
+  async toggleDailyBetPaid(matchId, userId, currentPaid) {
+    try {
+      await this.api(`/admin/daily-bets/${matchId}/users/${userId}/paid`, {
+        method: 'PUT',
+        body: JSON.stringify({ paid: !currentPaid })
+      });
+      this.renderAdminTodayBets();
+    } catch (e) { alert('Error: ' + e.message); }
+  },
+
+  async renderAdminPollasConfig() {
+    const container = document.getElementById('admin-pollas-config');
+    try {
+      const [s, ls] = await Promise.all([
+        this.api('/settings'),
+        this.api('/predictions/lock-status')
+      ]);
+      const p1Locked = ls.polla1Locked;
+      const p2Locked = ls.polla2Locked;
+      container.innerHTML = `
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <div>
+            <div style="font-size:13px;font-weight:600;color:var(--color-primary);margin-bottom:8px">⚽ Pronóstico 1 — Grupos</div>
+            <div style="display:grid;gap:6px">
+              <div style="display:flex;align-items:center;gap:8px">
+                <label style="font-size:12px;flex:1">Inscripción ($)</label>
+                <input type="number" id="p1-fee" value="${s.polla1_fee||20}" style="width:70px;text-align:center">
+              </div>
+              <div style="display:flex;align-items:center;gap:8px">
+                <label style="font-size:12px;flex:1">Mantenimiento ($)</label>
+                <input type="number" id="p1-maint" value="${s.polla1_maintenance||1}" style="width:70px;text-align:center">
+              </div>
+              <div style="display:flex;align-items:center;gap:8px">
+                <label style="font-size:12px;flex:1">1ro (%)</label>
+                <input type="number" id="p1-s1" value="${s.polla1_split_1st||70}" style="width:70px;text-align:center">
+              </div>
+              <div style="display:flex;align-items:center;gap:8px">
+                <label style="font-size:12px;flex:1">2do (%)</label>
+                <input type="number" id="p1-s2" value="${s.polla1_split_2nd||25}" style="width:70px;text-align:center">
+              </div>
+              <div style="display:flex;align-items:center;gap:8px">
+                <label style="font-size:12px;flex:1">3ro (%)</label>
+                <input type="number" id="p1-s3" value="${s.polla1_split_3rd||5}" style="width:70px;text-align:center">
+              </div>
+            </div>
+          </div>
+          <div>
+            <div style="font-size:13px;font-weight:600;color:var(--color-primary);margin-bottom:8px">🏆 Pronóstico 2 — Eliminatorias</div>
+            <div style="display:grid;gap:6px">
+              <div style="display:flex;align-items:center;gap:8px">
+                <label style="font-size:12px;flex:1">Inscripción ($)</label>
+                <input type="number" id="p2-fee" value="${s.polla2_fee||20}" style="width:70px;text-align:center">
+              </div>
+              <div style="display:flex;align-items:center;gap:8px">
+                <label style="font-size:12px;flex:1">Mantenimiento ($)</label>
+                <input type="number" id="p2-maint" value="${s.polla2_maintenance||1}" style="width:70px;text-align:center">
+              </div>
+              <div style="display:flex;align-items:center;gap:8px">
+                <label style="font-size:12px;flex:1">1ro (%)</label>
+                <input type="number" id="p2-s1" value="${s.polla2_split_1st||70}" style="width:70px;text-align:center">
+              </div>
+              <div style="display:flex;align-items:center;gap:8px">
+                <label style="font-size:12px;flex:1">2do (%)</label>
+                <input type="number" id="p2-s2" value="${s.polla2_split_2nd||25}" style="width:70px;text-align:center">
+              </div>
+              <div style="display:flex;align-items:center;gap:8px">
+                <label style="font-size:12px;flex:1">3ro (%)</label>
+                <input type="number" id="p2-s3" value="${s.polla2_split_3rd||5}" style="width:70px;text-align:center">
+              </div>
+            </div>
+          </div>
+        </div>
+        <button class="btn-primary" style="width:auto;margin-top:12px" onclick="app.savePollaSettings()">Guardar configuración</button>
+        <div class="success-msg" id="pollas-config-msg" style="margin-top:8px"></div>
+        <div style="margin-top:16px;padding:12px;background:var(--color-background-secondary);border-radius:var(--radius-md);border:1px solid var(--color-border)">
+          <div style="font-size:12px;font-weight:700;color:var(--color-primary);margin-bottom:10px">🔒 Control manual de bloqueo</div>
+          <div style="display:grid;gap:8px">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+              <span style="font-size:12px">⚽ Pronóstico 1 (Grupos) — Estado: <strong id="lock1-status">${p1Locked ? '🔒 Bloqueado' : '🟢 Abierto'}</strong></span>
+              <div style="display:flex;gap:6px">
+                <button class="btn-sm" style="background:#166534;color:#fff;border:none;border-radius:4px;padding:4px 10px;cursor:pointer;font-size:11px" onclick="app.setPollaLock('polla1','unlock')">🔓 Abrir</button>
+                <button class="btn-sm" style="background:#991b1b;color:#fff;border:none;border-radius:4px;padding:4px 10px;cursor:pointer;font-size:11px" onclick="app.setPollaLock('polla1','lock')">🔒 Cerrar</button>
+                <button class="btn-sm" style="background:transparent;color:var(--color-text-muted);border:1px solid var(--color-border);border-radius:4px;padding:4px 10px;cursor:pointer;font-size:11px" onclick="app.setPollaLock('polla1','auto')">⏱ Auto</button>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+              <span style="font-size:12px">🏆 Pronóstico 2 (Eliminatorias) — Estado: <strong id="lock2-status">${p2Locked ? '🔒 Bloqueado' : '🟢 Abierto'}</strong></span>
+              <div style="display:flex;gap:6px">
+                <button class="btn-sm" style="background:#166534;color:#fff;border:none;border-radius:4px;padding:4px 10px;cursor:pointer;font-size:11px" onclick="app.setPollaLock('polla2','unlock')">🔓 Abrir</button>
+                <button class="btn-sm" style="background:#991b1b;color:#fff;border:none;border-radius:4px;padding:4px 10px;cursor:pointer;font-size:11px" onclick="app.setPollaLock('polla2','lock')">🔒 Cerrar</button>
+                <button class="btn-sm" style="background:transparent;color:var(--color-text-muted);border:1px solid var(--color-border);border-radius:4px;padding:4px 10px;cursor:pointer;font-size:11px" onclick="app.setPollaLock('polla2','auto')">⏱ Auto</button>
+              </div>
+            </div>
+          </div>
+          <div style="font-size:10px;color:var(--color-text-muted);margin-top:8px">⏱ Auto = vuelve al bloqueo automático (5 min antes del partido)</div>
+          <div class="success-msg" id="lock-msg" style="margin-top:6px"></div>
+        </div>
+      `;
+    } catch (e) { container.innerHTML = `<div style="color:var(--color-danger)">Error: ${e.message}</div>`; }
+  },
+
+  async savePollaSettings() {
+    const msg = document.getElementById('pollas-config-msg');
+    try {
+      await this.api('/admin/pollas/settings', {
+        method: 'PUT',
+        body: JSON.stringify({
+          polla1_fee: document.getElementById('p1-fee').value,
+          polla1_maintenance: document.getElementById('p1-maint').value,
+          polla1_split_1st: document.getElementById('p1-s1').value,
+          polla1_split_2nd: document.getElementById('p1-s2').value,
+          polla1_split_3rd: document.getElementById('p1-s3').value,
+          polla2_fee: document.getElementById('p2-fee').value,
+          polla2_maintenance: document.getElementById('p2-maint').value,
+          polla2_split_1st: document.getElementById('p2-s1').value,
+          polla2_split_2nd: document.getElementById('p2-s2').value,
+          polla2_split_3rd: document.getElementById('p2-s3').value,
+        })
+      });
+      msg.textContent = '✓ Configuración guardada.';
+      setTimeout(() => msg.textContent = '', 3000);
+    } catch (e) { msg.textContent = e.message; msg.style.color = 'var(--color-danger)'; }
+  },
+
+  async setPollaLock(polla, action) {
+    const msg = document.getElementById('lock-msg');
+    try {
+      const result = await this.api(`/admin/pollas/${polla}/lock`, {
+        method: 'PUT',
+        body: JSON.stringify({ action })
+      });
+      const labels = { lock: '🔒 Cerrado manualmente', unlock: '🟢 Abierto manualmente', auto: '⏱ Automático' };
+      if (polla === 'polla1') {
+        const el = document.getElementById('lock1-status');
+        if (el) el.textContent = action === 'auto' ? (result.locked ? '🔒 Bloqueado (auto)' : '🟢 Abierto (auto)') : labels[action];
+      } else {
+        const el = document.getElementById('lock2-status');
+        if (el) el.textContent = action === 'auto' ? (result.polla2Locked ? '🔒 Bloqueado (auto)' : '🟢 Abierto (auto)') : labels[action];
+      }
+      msg.style.color = 'var(--color-success)';
+      msg.textContent = `✓ Polla ${polla === 'polla1' ? '1' : '2'} ${action === 'lock' ? 'cerrada' : action === 'unlock' ? 'abierta' : 'en modo automático'}.`;
+      setTimeout(() => msg.textContent = '', 3000);
+    } catch(e) { msg.style.color = 'var(--color-danger)'; msg.textContent = e.message; }
+  },
+
+  async renderAdminPollasRegs() {
+    const container = document.getElementById('admin-pollas-regs');
+    if (!container) return;
+    try {
+      const users = await this.api('/admin/users');
+      const nonAdmin = users.filter(u => !u.is_admin);
+
+      container.innerHTML = `
+        <div style="font-size:13px;color:var(--color-text-muted);margin-bottom:10px">
+          Lista de participantes y estado de pago. Para confirmar o quitar pagos usa la pestaña <strong>Usuarios</strong>.
+        </div>
+        <table class="leaderboard-table">
+          <thead>
+            <tr>
+              <th>Participante</th>
+              <th style="text-align:center">⚽ Pronóstico 1 · Grupos</th>
+              <th style="text-align:center">🏆 Pronóstico 2 · Finales</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${nonAdmin.map(u => `
+              <tr>
+                <td class="user-cell">
+                  <span class="avatar">${u.display_name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase()}</span>
+                  <span>${u.display_name}</span>
+                </td>
+                <td style="text-align:center">
+                  <span class="chip ${u.paid_groups ? 'paid' : 'unpaid'}">${u.paid_groups ? '✓ Pagado' : 'Pendiente'}</span>
+                </td>
+                <td style="text-align:center">
+                  <span class="chip ${u.paid_knockout ? 'paid' : 'unpaid'}">${u.paid_knockout ? '✓ Pagado' : 'Pendiente'}</span>
+                </td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+        ${nonAdmin.length === 0 ? '<div style="font-size:13px;color:var(--color-text-muted);padding:8px 0">Sin participantes registrados.</div>' : ''}
+      `;
+    } catch (e) { container.innerHTML = `<div style="color:var(--color-danger)">Error: ${e.message}</div>`; }
+  },
+
+  async renderAdminMiniPollas() {
+    const container = document.getElementById('admin-minipollas');
+    if (!container) return;
+    try {
+      const settings = await this.api('/settings');
+      const phases = [
+        { key: 'r16',   label: '⚽ Dieciseisavos' },
+        { key: 'qf',    label: '🏅 Octavos de final' },
+        { key: 'sf_qf', label: '🏆 Cuartos de final' },
+        { key: 'sf_sf', label: '🌟 Semifinales + Final' }
+      ];
+
+      const lbData = {};
+      for (const p of phases) {
+        try { lbData[p.key] = await this.api(`/mini-polla/${p.key}/leaderboard`); }
+        catch (e) { lbData[p.key] = { leaderboard: [], totalPot: 0 }; }
+      }
+
+      container.innerHTML = `
+        <div style="font-size:13px;color:var(--color-text-muted);margin-bottom:12px">
+          Configura montos e inscripciones de cada mini-pronóstico.
+        </div>
+        <div style="display:grid;gap:8px;margin-bottom:16px">
+          ${phases.map(p => `
+            <div style="display:flex;align-items:center;gap:10px">
+              <label style="font-size:13px;flex:1">${p.label}</label>
+              <span style="font-size:13px">$</span>
+              <input type="number" min="1" max="100" id="mp-fee-${p.key}"
+                value="${settings[`mini_polla_fee_${p.key}`] || 5}"
+                style="width:70px;text-align:center">
+            </div>
+          `).join('')}
+        </div>
+        <button class="btn-primary" style="width:auto;margin-bottom:16px" onclick="app.saveMinPollaFees()">
+          Guardar montos
+        </button>
+        <div class="success-msg" id="mp-fees-msg" style="margin-bottom:12px"></div>
+        <hr style="margin:0 0 16px;border-color:var(--color-border)">
+        ${phases.map(p => {
+          const lb = lbData[p.key];
+          const prize1 = (lb.totalPot * 0.7).toFixed(2);
+          const prize2 = (lb.totalPot * 0.3).toFixed(2);
+          return `
+            <div style="margin-bottom:20px">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+                <div style="font-size:13px;font-weight:600;color:var(--color-primary)">${p.label}</div>
+                <div style="font-size:12px;color:var(--color-text-muted)">
+                  Pozo: $${lb.totalPot.toFixed(0)} · 🥇$${prize1} · 🥈$${prize2}
+                </div>
+              </div>
+              ${lb.leaderboard.length === 0
+                ? `<div style="font-size:12px;color:var(--color-text-muted);font-style:italic">Sin inscritos aún.</div>`
+                : lb.leaderboard.map((u, i) => `
+                  <div style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:13px;border-bottom:1px solid var(--color-border)">
+                    <span style="font-size:11px;color:var(--color-text-muted);width:16px">${i+1}</span>
+                    <span style="flex:1">${u.display_name}</span>
+                    <span style="font-size:12px;color:var(--color-text-muted)">${u.points} pts</span>
+                    <span class="chip ${u.paid ? 'paid' : 'unpaid'}">${u.paid ? 'Pagado' : 'Pendiente'}</span>
+                    <button class="btn-sm btn-ghost" onclick="app.toggleMPPayment('${p.key}',${u.user_id},${u.paid})">
+                      ${u.paid ? 'Quitar' : 'Confirmar'}
+                    </button>
+                  </div>`).join('')
+              }
+            </div>`;
+        }).join('')}
+      `;
+    } catch (e) {
+      container.innerHTML = `<div style="color:var(--color-danger)">Error: ${e.message}</div>`;
+    }
+  },
+
+  async saveMinPollaFees() {
+    const msg = document.getElementById('mp-fees-msg');
+    try {
+      await this.api('/admin/mini-polla/fees', {
+        method: 'PUT',
+        body: JSON.stringify({
+          fee_r16:   parseFloat(document.getElementById('mp-fee-r16')?.value || 5),
+          fee_qf:    parseFloat(document.getElementById('mp-fee-qf')?.value || 3),
+          fee_sf_qf: parseFloat(document.getElementById('mp-fee-sf_qf')?.value || 3),
+          fee_sf_sf: parseFloat(document.getElementById('mp-fee-sf_sf')?.value || 2)
+        })
+      });
+      msg.textContent = '✓ Montos guardados.';
+      msg.style.color = 'var(--color-success)';
+      setTimeout(() => { msg.textContent = ''; msg.style.color = ''; }, 3000);
+    } catch (e) { msg.textContent = e.message; msg.style.color = 'var(--color-danger)'; }
+  },
+
+  async toggleMPPayment(phase, userId, currentPaid) {
+    try {
+      await this.api(`/admin/mini-polla/${phase}/users/${userId}/paid`, {
+        method: 'PUT',
+        body: JSON.stringify({ paid: !currentPaid })
+      });
+      this.renderAdminMiniPollas();
+    } catch (e) { alert('Error: ' + e.message); }
+  },
+
+  renderAdminMatches() {
+    const container = document.getElementById('admin-matches');
+    if (!container) return;
+    const phases = [
+      { key: 'groups', label: 'Grupos' },
+      { key: 'r16',    label: 'Dieciseisavos' },
+      { key: 'qf',     label: 'Octavos de final' },
+      { key: 'sf_qf',  label: 'Cuartos de final', ids: ['SF-1','SF-2','SF-3','SF-4'] },
+      { key: 'sf_sf',  label: 'Semifinales', ids: ['SF-5','SF-6'] },
+      { key: 'tp',     label: '3er puesto' },
+      { key: 'final',  label: 'Final' }
+    ];
+
+    const groupsComplete = this.matches.filter(m => m.phase === 'groups').every(m => m.home_score != null);
+    const bracketGenerated = this.matches.filter(m => m.phase === 'r16').some(m => m.home_team != null);
+
+    container.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+        <div style="font-size:13px;color:var(--color-text-muted)">Los resultados se guardan y propagan automáticamente al siguiente partido.</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          ${!bracketGenerated
+            ? `<button class="btn-primary" style="width:auto;background:linear-gradient(135deg,#1a5c8a,#0f3d6b)" onclick="app.openBracketGenerator()">🔄 Generar Eliminatorias</button>`
+            : `<button class="btn-sm" style="background:transparent;border:1px solid var(--color-border);color:var(--color-text-muted);border-radius:6px;padding:6px 12px;cursor:pointer;font-size:12px" onclick="app.openBracketGenerator()">🔄 Regenerar bracket</button>`
+          }
+          <button class="btn-sm" style="background:transparent;border:1px solid var(--color-border);color:var(--color-text-muted);border-radius:6px;padding:6px 12px;cursor:pointer;font-size:12px" onclick="app.repropagate()" title="Avanza los ganadores reales a la siguiente ronda">⚡ Propagar ganadores</button>
+          <button class="btn-primary" style="width:auto" onclick="app.saveAllAdminMatches()">💾 Guardar todo</button>
+        </div>
+      </div>
+      <div class="success-msg" id="admin-matches-msg" style="margin-bottom:8px"></div>
+      <div style="margin-bottom:14px;padding:12px;background:var(--color-surface);border:1px solid rgba(251,191,36,0.25);border-radius:10px">
+        <div style="font-size:13px;font-weight:700;color:#fbbf24;margin-bottom:6px">🎁 Compensar un partido</div>
+        <div style="font-size:11px;color:var(--color-text-muted);margin-bottom:8px">Otorga 5 puntos fijos a TODOS los inscritos en ese partido, sin importar su predicción. Útil si hubo un problema técnico.</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+          <select id="compensate-select" style="flex:1;min-width:180px;padding:6px 10px;border:1px solid var(--color-border);border-radius:6px;background:var(--color-background-secondary);color:var(--color-text);font-size:12px">
+            <option value="">Selecciona un partido...</option>
+            ${this.matches.filter(m => m.phase !== 'groups').map(m => {
+              const home = m.home_team ? this.teamByCode(m.home_team)?.name : '?';
+              const away = m.away_team ? this.teamByCode(m.away_team)?.name : '?';
+              return `<option value="${m.id}">${m.id} — ${home} vs ${away}</option>`;
+            }).join('')}
+          </select>
+          <button class="btn-sm" style="background:#fbbf24;color:#1a1200;border:none;border-radius:6px;padding:6px 12px;cursor:pointer;font-weight:600;font-size:12px" onclick="app.compensateMatch('add')">Compensar</button>
+        </div>
+        <div id="compensated-list" style="margin-top:8px;font-size:11px"></div>
+      </div>
+      ${phases.map(p => {
+        let matches;
+        if (p.ids) {
+          matches = this.matches.filter(m => p.ids.includes(m.id));
+        } else {
+          matches = this.matches.filter(m => m.phase === p.key);
+        }
+        if (!matches.length) return '';
+        return `
+          <details style="margin-bottom:10px">
+            <summary style="cursor:pointer;font-weight:500;padding:6px 0">${p.label} (${matches.length})</summary>
+            <div style="padding-top:8px">
+              ${matches.map(m => {
+                const timeStr = m.match_time ? `${m.match_date} ${m.match_time}` : m.match_date;
+                const hasResult = m.home_score != null;
+
+                if (p.key === 'groups') {
+                  return `<div class="user-row" data-admin-match="${m.id}" style="grid-template-columns:1fr auto;${hasResult?'border-left:2px solid var(--color-success)':''}">
+                    <div style="display:flex;align-items:center;gap:6px;font-size:13px;flex-wrap:wrap">
+                      <span>${m.home_flag||''}</span>
+                      <span style="flex:1;font-weight:500">${m.home_name||m.home_team}</span>
+                      <input type="number" min="0" max="20" data-field="home_score" value="${m.home_score??''}" style="width:46px;text-align:center;padding:4px" placeholder="—">
+                      <span style="color:var(--color-text-muted)">—</span>
+                      <input type="number" min="0" max="20" data-field="away_score" value="${m.away_score??''}" style="width:46px;text-align:center;padding:4px" placeholder="—">
+                      <span style="flex:1;text-align:right;font-weight:500">${m.away_name||m.away_team}</span>
+                      <span>${m.away_flag||''}</span>
+                      <span style="font-size:11px;color:var(--color-text-muted);width:100%">${timeStr}</span>
+                    </div>
+                    <span class="match-save-status" style="font-size:14px;width:20px;text-align:center"></span>
+                  </div>`;
+                }
+
+                const homeTeam = m.home_team ? this.teamByCode(m.home_team) : null;
+                const awayTeam = m.away_team ? this.teamByCode(m.away_team) : null;
+                const isDraw = m.home_score != null && m.away_score != null && m.home_score === m.away_score;
+
+                // Calcular ganador automático para mostrar
+                let autoWinner = null;
+                if (m.home_score != null && m.away_score != null) {
+                  if (m.home_score > m.away_score) autoWinner = homeTeam;
+                  else if (m.away_score > m.home_score) autoWinner = awayTeam;
+                  else if (m.pen_home != null && m.pen_away != null) {
+                    if (m.pen_home > m.pen_away) autoWinner = homeTeam;
+                    else if (m.pen_away > m.pen_home) autoWinner = awayTeam;
+                  }
+                }
+
+                return `<div class="user-row" data-admin-match="${m.id}" data-home="${m.home_team||''}" data-away="${m.away_team||''}" style="grid-template-columns:1fr auto;${hasResult?'border-left:2px solid var(--color-success)':''}">
+                  <div style="font-size:13px">
+                    <div style="color:var(--color-text-muted);margin-bottom:6px">${m.label||''} · ${timeStr}</div>
+                    <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;font-weight:500">
+                      <span>${homeTeam?.flag||'?'} ${homeTeam?.name||'Por definir'}</span>
+                      <span style="color:var(--color-text-muted)">vs</span>
+                      <span>${awayTeam?.flag||'?'} ${awayTeam?.name||'Por definir'}</span>
+                    </div>
+                    <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;margin-bottom:6px">
+                      <label style="font-size:12px;color:var(--color-text-muted)">Marcador:</label>
+                      <input type="number" min="0" max="20" class="admin-score" data-field="home_score" value="${m.home_score??''}" style="width:46px;text-align:center" placeholder="—">
+                      <span style="color:var(--color-text-muted)">—</span>
+                      <input type="number" min="0" max="20" class="admin-score" data-field="away_score" value="${m.away_score??''}" style="width:46px;text-align:center" placeholder="—">
+                    </div>
+                    <div class="admin-pen-section" style="${isDraw ? '' : 'display:none'}">
+                      <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;margin-bottom:6px">
+                        <label style="font-size:12px;color:var(--color-text-muted)">⚖️ Penales:</label>
+                        <input type="number" min="0" max="30" data-field="pen_home" value="${m.pen_home??''}" style="width:46px;text-align:center" placeholder="—">
+                        <span style="color:var(--color-text-muted)">—</span>
+                        <input type="number" min="0" max="30" data-field="pen_away" value="${m.pen_away??''}" style="width:46px;text-align:center" placeholder="—">
+                      </div>
+                    </div>
+                    ${autoWinner ? `<div style="font-size:12px;color:var(--color-success);font-weight:500">✓ Ganador: ${autoWinner.flag||''} ${autoWinner.name}</div>` : (isDraw && !m.pen_home ? `<div style="font-size:12px;color:var(--color-primary)">⚠️ Ingresa penales para definir ganador</div>` : '')}
+                  </div>
+                  <span class="match-save-status" style="font-size:14px;width:20px;text-align:center"></span>
+                </div>`;
+              }).join('')}
+            </div>
+          </details>
+        `;
+      }).join('')}
+    `;
+
+    // Autoguardado en blur/change + penales dinámicos
+    container.querySelectorAll('[data-admin-match]').forEach(row => {
+      // Mostrar/ocultar penales según empate
+      row.querySelectorAll('.admin-score').forEach(input => {
+        input.addEventListener('input', () => {
+          const hVal = row.querySelector('.admin-score[data-field="home_score"]')?.value;
+          const aVal = row.querySelector('.admin-score[data-field="away_score"]')?.value;
+          const penSection = row.querySelector('.admin-pen-section');
+          if (!penSection) return;
+          const drawNow = hVal !== '' && aVal !== '' && parseInt(hVal) === parseInt(aVal);
+          penSection.style.display = drawNow ? '' : 'none';
+          if (!drawNow) {
+            row.querySelector('[data-field="pen_home"]') && (row.querySelector('[data-field="pen_home"]').value = '');
+            row.querySelector('[data-field="pen_away"]') && (row.querySelector('[data-field="pen_away"]').value = '');
+          }
+        });
+      });
+
+      row.querySelectorAll('[data-field]').forEach(el => {
+        el.addEventListener('change', () => this.saveAdminMatch(row));
+        if (el.tagName === 'INPUT') {
+          el.addEventListener('blur', () => this.saveAdminMatch(row));
+        }
+      });
+    });
+
+    // Cargar la lista de partidos compensados
+    this.loadCompensatedList();
+  },
+
+  async openBracketGenerator() {
+    const statusDiv = document.getElementById('admin-matches-msg');
+    const groupsComplete = this.matches.filter(m => m.phase === 'groups').every(m => m.home_score != null);
+    const played = this.matches.filter(m => m.phase === 'groups' && m.home_score != null).length;
+    const total = this.matches.filter(m => m.phase === 'groups').length;
+
+    const msg = groupsComplete
+      ? '¿Generar eliminatorias con los 72 resultados completos?'
+      : `Faltan ${total - played} de ${total} partidos de grupos. ¿Generar el bracket con los resultados actuales? (puedes regenerarlo después)`;
+
+    if (!confirm(msg)) return;
+
+    if (statusDiv) { statusDiv.textContent = 'Generando bracket...'; statusDiv.style.color = 'var(--color-text-muted)'; }
+
+    try {
+      const result = await this.api('/admin/bracket/generate', { method: 'POST' });
+      await this.loadData();
+      this.renderAdminMatches();
+
+      const qualified = result.qualifiedThirds.map(t => {
+        const team = this.teams.find(tm => tm.code === t.code);
+        return `${team?.flag||''} ${team?.name||t.code} (${t.group})`;
+      }).join(', ');
+      const eliminated = result.eliminatedThirds.map(t => {
+        const team = this.teams.find(tm => tm.code === t.code);
+        return `${team?.flag||''} ${team?.name||t.code} (${t.group})`;
+      }).join(', ');
+
+      if (statusDiv) {
+        statusDiv.innerHTML = `
+          <div style="color:var(--color-success);margin-bottom:8px">✓ Bracket generado — ${played}/${total} partidos de grupos cargados</div>
+          <div style="font-size:12px;color:var(--color-text-muted)">
+            <strong>8 mejores terceros (clasificados):</strong> ${qualified}<br>
+            ${eliminated ? `<strong>Terceros eliminados:</strong> ${eliminated}` : ''}
+            ${!groupsComplete ? '<br><span style="color:#fbbf24">⚠️ Recuerda regenerar el bracket cuando cargues los resultados restantes.</span>' : ''}
+          </div>`;
+      }
+    } catch (e) {
+      if (statusDiv) { statusDiv.textContent = 'Error: ' + e.message; statusDiv.style.color = 'var(--color-danger)'; }
+    }
+  },
+
+  async repropagate() {
+    const msg = document.getElementById('admin-matches-msg');
+    try {
+      await this.api('/admin/bracket/propagate', { method: 'POST' });
+      await this.loadData();
+      this.renderAdminMatches();
+      this.renderAdminPodium();
+      if (msg) {
+        msg.textContent = '✓ Sincronizado.';
+        msg.style.color = 'var(--color-success)';
+        setTimeout(() => msg.textContent = '', 2000);
+      }
+    } catch (e) {
+      if (msg) { msg.textContent = 'Error: ' + e.message; msg.style.color = 'var(--color-danger)'; }
+    }
+  },
+
+  async compensateMatch(action, matchId) {
+    const msg = document.getElementById('admin-matches-msg');
+    const id = matchId || document.getElementById('compensate-select')?.value;
+    if (!id) { if (msg) { msg.textContent = 'Selecciona un partido primero.'; msg.style.color = 'var(--color-danger)'; } return; }
+    try {
+      await this.api(`/admin/compensated/${id}`, { method: 'PUT', body: JSON.stringify({ action }) });
+      this._compensatedSet = null; // invalidar cache para que se recargue en el bracket
+      await this.loadCompensatedList();
+      if (msg) {
+        msg.textContent = action === 'add'
+          ? `✓ Partido ${id} compensado — todos los inscritos reciben 5 pts.`
+          : `✓ Compensación de ${id} retirada.`;
+        msg.style.color = 'var(--color-success)';
+        setTimeout(() => msg.textContent = '', 3000);
+      }
+    } catch (e) {
+      if (msg) { msg.textContent = 'Error: ' + e.message; msg.style.color = 'var(--color-danger)'; }
+    }
+  },
+
+  async loadCompensatedList() {
+    const div = document.getElementById('compensated-list');
+    if (!div) return;
+    try {
+      const { compensated } = await this.api('/admin/compensated');
+      if (!compensated.length) {
+        div.innerHTML = '<span style="color:var(--color-text-muted)">No hay partidos compensados.</span>';
+        return;
+      }
+      div.innerHTML = '<strong style="color:var(--color-text-muted)">Compensados:</strong> ' + compensated.map(id => {
+        const m = this.matches.find(mm => mm.id === id);
+        const home = m?.home_team ? this.teamByCode(m.home_team)?.name : '?';
+        const away = m?.away_team ? this.teamByCode(m.away_team)?.name : '?';
+        const label = m ? `${id} (${home} vs ${away})` : id;
+        return `<span style="display:inline-flex;align-items:center;gap:4px;background:rgba(251,191,36,0.12);border:1px solid rgba(251,191,36,0.3);border-radius:10px;padding:2px 8px;margin:2px;font-size:11px">
+          ${label}
+          <button onclick="app.showCompensationAudit('${id}')" style="background:none;border:none;color:#60a5fa;cursor:pointer;font-size:11px;padding:0 2px" title="Ver quién predijo y cuándo">🔍</button>
+          <button onclick="app.compensateMatch('remove','${id}')" style="background:none;border:none;color:#fbbf24;cursor:pointer;font-size:13px;padding:0;line-height:1" title="Quitar compensación">✕</button>
+        </span>`;
+      }).join('');
+    } catch (e) {
+      div.innerHTML = `<span style="color:var(--color-danger)">Error: ${e.message}</span>`;
+    }
+  },
+
+  async downloadBackupDB() {
+    try {
+      const resp = await fetch(`${API}/admin/backup-db`, {
+        headers: { 'Authorization': `Bearer ${this.token}` }
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ error: 'Error desconocido' }));
+        throw new Error(err.error || 'No se pudo descargar el backup');
+      }
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `polla-backup-${new Date().toISOString().slice(0, 10)}.db`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      alert('Error al descargar backup: ' + e.message);
+    }
+  },
+
+  async exportUsersXlsx() {
+    try {
+      // Cargar SheetJS dinámicamente si no está disponible
+      if (!window.XLSX) {
+        await new Promise((resolve, reject) => {
+          const s = document.createElement('script');
+          s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+          s.onload = resolve; s.onerror = reject;
+          document.head.appendChild(s);
+        });
+      }
+      const XLSX = window.XLSX;
+
+      // Cargar datos con el token JWT (llamada autenticada)
+      const [users, bracketData, lb1, lb2] = await Promise.all([
+        this.api('/admin/users'),
+        this.api('/admin/bracket-completion').catch(() => ({ users: [], totalKO: 0 })),
+        this.api('/leaderboard/groups').catch(() => ({ leaderboard: [] })),
+        this.api('/leaderboard/knockout').catch(() => ({ leaderboard: [] }))
+      ]);
+
+      const bracketBy = Object.fromEntries((bracketData.users || []).map(b => [b.user_id, b]));
+      const ptsGroups = Object.fromEntries((lb1.leaderboard || []).map(u => [u.user_id, u.points]));
+      const ptsKO = Object.fromEntries((lb2.leaderboard || []).map(u => [u.user_id, u.points]));
+
+      // Construir filas
+      const rows = users
+        .filter(u => !u.is_admin)
+        .map(u => {
+          const bracket = bracketBy[u.id] || {};
+          return {
+            'Nombre':             u.display_name,
+            'Usuario':            u.username,
+            'Pagó Grupos':        u.paid_groups  ? 'Sí' : 'No',
+            'Pagó Eliminatorias': u.paid_knockout ? 'Sí' : 'No',
+            'Pts Grupos':         ptsGroups[u.id] ?? 0,
+            'Pts Eliminatorias':  ptsKO[u.id]     ?? 0,
+            'Bracket KO':         `${bracket.filled ?? 0}/${bracket.total ?? 0}`,
+            'Bracket Completo':   bracket.complete ? 'Sí' : 'No',
+          };
+        })
+        .sort((a, b) => a['Nombre'].localeCompare(b['Nombre']));
+
+      // Crear workbook
+      const ws = XLSX.utils.json_to_sheet(rows);
+
+      // Ancho de columnas
+      ws['!cols'] = [
+        { wch: 22 }, { wch: 14 }, { wch: 13 }, { wch: 18 },
+        { wch: 11 }, { wch: 18 }, { wch: 11 }, { wch: 16 }
+      ];
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Participantes');
+
+      // Descargar
+      const fecha = new Date().toISOString().slice(0, 10);
+      XLSX.writeFile(wb, `polla-participantes-${fecha}.xlsx`);
+    } catch (e) {
+      alert('Error al generar el Excel: ' + e.message);
+    }
+  },
+
+  async fixPredictionTime(userId, matchId, displayName) {
+    if (!confirm(`¿Corregir el timestamp de ${displayName} en ${matchId}?\n\nEsto le dará 8 puntos (exacto válido). Úsalo solo si el usuario predijo antes del partido pero el sistema registró la hora mal.`)) return;
+    try {
+      const result = await this.api(`/admin/predictions/${userId}/${matchId}/fix-time`, { method: 'PUT' });
+      alert(`✓ Corregido: ${result.message}\n\nRecarga la auditoría para ver el cambio.`);
+      // Recargar la auditoría
+      const old = document.getElementById('comp-audit-modal');
+      if (old) old.remove();
+      await this.showCompensationAudit(matchId);
+    } catch(e) {
+      alert('Error: ' + e.message);
+    }
+  },
+
+  async showCompensationAudit(matchId) {
+    const existingAudit = document.getElementById('comp-audit-modal');
+    if (existingAudit) existingAudit.remove();
+    const modal = document.createElement('div');
+    modal.id = 'comp-audit-modal';
+    modal.innerHTML = `
+      <style>
+        #comp-audit-modal { position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,0.88);display:flex;align-items:flex-start;justify-content:center;padding:20px 10px;overflow-y:auto; }
+        #comp-audit-modal .ca-panel { width:min(700px,100%);background:var(--color-background,#101018);border:1px solid var(--color-border);border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,0.5); }
+        #comp-audit-modal .ca-head { display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--color-border); }
+        #comp-audit-modal .ca-body { padding:14px 16px 20px;overflow-y:auto;max-height:80vh; }
+        #comp-audit-modal table { width:100%;border-collapse:collapse;font-size:12px; }
+        #comp-audit-modal th { font-size:10px;color:var(--color-text-muted);font-weight:600;padding:4px 8px;border-bottom:1px solid var(--color-border);text-align:left; }
+        #comp-audit-modal td { padding:5px 8px;border-bottom:1px solid rgba(255,255,255,0.04);vertical-align:middle; }
+        #comp-audit-modal tr:last-child td { border-bottom:none; }
+        #comp-audit-modal .badge-8 { background:rgba(201,168,76,0.2);color:#C9A84C;border:1px solid rgba(201,168,76,0.4);border-radius:8px;padding:1px 6px;font-weight:700;font-size:11px; }
+        #comp-audit-modal .badge-5 { background:rgba(255,255,255,0.06);color:var(--color-text-muted);border:1px solid var(--color-border);border-radius:8px;padding:1px 6px;font-size:11px; }
+        #comp-audit-modal .badge-0 { background:rgba(239,68,68,0.1);color:#f87171;border:1px solid rgba(239,68,68,0.2);border-radius:8px;padding:1px 6px;font-size:11px; }
+        #comp-audit-modal .before { color:#4ade80; }
+        #comp-audit-modal .after { color:#f87171; }
+      </style>
+      <div class="ca-panel">
+        <div class="ca-head">
+          <div style="font-weight:700;font-size:14px">🔍 Auditoría de compensación — <span style="color:var(--color-primary)">${matchId}</span></div>
+          <button onclick="document.getElementById('comp-audit-modal').remove()" style="background:transparent;border:1px solid var(--color-border);color:var(--color-text-muted);border-radius:8px;padding:4px 10px;cursor:pointer;font-size:13px">✕ Cerrar</button>
+        </div>
+        <div class="ca-body" id="comp-audit-content">
+          <div style="text-align:center;color:var(--color-text-muted);padding:2rem">Cargando...</div>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+    modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+
+    const container = document.getElementById('comp-audit-content');
+    try {
+      const data = await this.api(`/admin/compensated/${matchId}/audit`);
+      const { match, predictions } = data;
+
+      const rows = predictions.map(p => {
+        const badgeClass = p.pts_compensacion === 8 ? 'badge-8' : p.pts_compensacion === 5 ? 'badge-5' : 'badge-0';
+        const tiempoClass = p.antes_del_partido === true ? 'before' : p.antes_del_partido === false ? 'after' : '';
+        const tiempoLabel = p.antes_del_partido === true ? '✓ Antes' : p.antes_del_partido === false ? '✗ Después' : '—';
+        // Botón para corregir solo si tiene exacto pero aparece como "después"
+        const fixBtn = (p.exacto && p.antes_del_partido === false)
+          ? `<button onclick="app.fixPredictionTime(${p.user_id},'${matchId}','${p.display_name.replace(/'/g,"\\'")}')" style="margin-left:6px;font-size:10px;padding:1px 6px;border:1px solid #fbbf24;border-radius:6px;background:transparent;color:#fbbf24;cursor:pointer" title="Corregir timestamp — dar 8 pts">🔧 Corregir</button>`
+          : '';
+        return `<tr>
+          <td style="font-weight:500">${p.display_name}</td>
+          <td style="text-align:center;font-weight:600">${p.pred || '<span style="color:var(--color-text-muted)">—</span>'}</td>
+          <td style="text-align:center">${p.exacto ? '✓' : '—'}</td>
+          <td style="font-size:11px;color:var(--color-text-muted)">${p.updated_at_ecu || '<em>Sin predicción</em>'}</td>
+          <td style="text-align:center" class="${tiempoClass}">${tiempoLabel}${fixBtn}</td>
+          <td style="text-align:center"><span class="${badgeClass}">${p.pts_compensacion} pts</span></td>
+        </tr>`;
+      }).join('');
+
+      container.innerHTML = `
+        <div style="margin-bottom:12px;padding:8px 12px;background:var(--color-surface);border-radius:8px;font-size:12px">
+          <strong>${match.home} vs ${match.away}</strong> · Resultado: ${match.score} · 
+          <span style="color:var(--color-text-muted)">Inicio del partido: <strong>${match.start}</strong></span>
+        </div>
+        <div style="font-size:11px;color:var(--color-text-muted);margin-bottom:8px">
+          🟡 8 pts = acertó exacto Y predijo ANTES del partido · Gris 5 pts = compensación · Rojo 0 pts = sin predicción
+        </div>
+        <table>
+          <thead><tr>
+            <th>Usuario</th><th style="text-align:center">Pred</th><th style="text-align:center">Exacto</th>
+            <th>Hora predicción (ECU)</th><th style="text-align:center">¿Antes?</th><th style="text-align:center">Puntos</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+        <div style="margin-top:10px;font-size:11px;color:var(--color-text-muted);border-top:1px solid var(--color-border);padding-top:8px">
+          Esta tabla muestra la hora real en que cada usuario guardó su predicción. Los que predijeron después del inicio del partido no califican para los 8 puntos.
+        </div>`;
+    } catch(e) {
+      container.innerHTML = `<div style="color:var(--color-danger);padding:1rem">⚠️ ${e.message}</div>`;
+    }
+  },
+
+  async saveAllAdminMatches() {
+    const container = document.getElementById('admin-matches');
+    const msg = document.getElementById('admin-matches-msg');
+    const rows = container.querySelectorAll('[data-admin-match]');
+    let saved = 0;
+    for (const row of rows) {
+      const body = {};
+      row.querySelectorAll('[data-field]').forEach(el => {
+        const f = el.dataset.field;
+        if (['home_score','away_score','pen_home','pen_away'].includes(f)) {
+          body[f] = el.value === '' ? null : parseInt(el.value);
+        } else if (el.value !== '') {
+          body[f] = el.value;
+        }
+      });
+      if (body.home_score == null && body.away_score == null && !body.home_team) continue;
+      try {
+        await this.api(`/admin/matches/${row.dataset.adminMatch}`, { method: 'PUT', body: JSON.stringify(body) });
+        saved++;
+        const status = row.querySelector('.match-save-status');
+        if (status) { status.textContent = '✓'; status.style.color = 'var(--color-success)'; }
+      } catch (e) {}
+    }
+    if (msg) {
+      msg.textContent = `✓ ${saved} resultado${saved !== 1 ? 's' : ''} guardado${saved !== 1 ? 's' : ''}.`;
+      msg.style.color = 'var(--color-success)';
+      setTimeout(() => { msg.textContent = ''; }, 3000);
+    }
+    await this.loadData();
+    this.renderAdminMatches();
+    this.renderAdminPodium();
+  },
+
+  async saveAdminMatch(row) {
+    const matchId = row.dataset.adminMatch;
+    const body = {};
+
+    row.querySelectorAll('[data-field]').forEach(el => {
+      const f = el.dataset.field;
+      if (['home_score','away_score','pen_home','pen_away'].includes(f)) {
+        body[f] = el.value === '' ? null : parseInt(el.value);
+      }
+    });
+
+    // Solo guardar si hay marcador completo
+    if (body.home_score == null || body.away_score == null) return;
+
+    const status = row.querySelector('.match-save-status');
+    try {
+      await this.api(`/admin/matches/${matchId}`, { method: 'PUT', body: JSON.stringify(body) });
+      if (status) {
+        status.textContent = '✓';
+        status.style.color = 'var(--color-success)';
+        setTimeout(() => { status.textContent = ''; }, 2000);
+      }
+      row.style.borderLeft = '2px solid var(--color-success)';
+      // Recargar datos (los partidos siguientes se actualizan al expandir su sección)
+      await this.loadData();
+      // Solo re-renderizar el podio (que es ligero)
+      this.renderAdminPodium();
+      // Y debouncedRefresh para actualizar admin matches sin perder foco
+      this._scheduleAdminRefresh();
+    } catch (e) {
+      if (status) { status.textContent = '✗'; status.style.color = 'var(--color-danger)'; }
+      if (e.message) console.warn('Error guardando:', e.message);
+    }
+  },
+
+  _scheduleAdminRefresh() {
+    // Re-renderizar admin matches después de un tiempo sin actividad
+    if (this._adminRefreshTimer) clearTimeout(this._adminRefreshTimer);
+    this._adminRefreshTimer = setTimeout(() => {
+      const activeEl = document.activeElement;
+      // Solo refrescar si el usuario no está editando un input
+      if (!activeEl || activeEl.tagName !== 'INPUT') {
+        this.renderAdminMatches();
+      } else {
+        // Reintentar en 2 segundos
+        this._scheduleAdminRefresh();
+      }
+    }, 1500);
+  },
+
+  async renderAdminPodium() {
+    const container = document.getElementById('admin-podium');
+    if (!container) return;
+
+    // Calcular podio automáticamente desde resultados reales
+    const finalMatch = this.matches.find(m => m.id === 'FINAL');
+    const tpMatch = this.matches.find(m => m.id === 'TP');
+
+    let champion = null, runnerUp = null, thirdPlace = null;
+
+    if (finalMatch?.winner) {
+      champion = this.teamByCode(finalMatch.winner);
+      const loserCode = finalMatch.winner === finalMatch.home_team ? finalMatch.away_team : finalMatch.home_team;
+      runnerUp = loserCode ? this.teamByCode(loserCode) : null;
+    }
+    if (tpMatch?.winner) {
+      thirdPlace = this.teamByCode(tpMatch.winner);
+    }
+
+    const teamCard = (medal, label, team, hint) => team ? `
+      <div class="podium-slot">
+        <span class="podium-medal">${medal}</span>
+        <span class="podium-label">${label}</span>
+        <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--color-surface-2);border-radius:var(--radius-md);font-size:15px;font-weight:500">
+          <span style="font-size:22px">${team.flag||''}</span><span>${team.name}</span>
+        </div>
+      </div>` : `
+      <div class="podium-slot">
+        <span class="podium-medal">${medal}</span>
+        <span class="podium-label">${label}</span>
+        <div style="padding:10px 14px;background:var(--color-surface-2);border-radius:var(--radius-md);font-size:13px;color:var(--color-text-muted);font-style:italic">${hint}</div>
+      </div>`;
+
+    container.innerHTML = `
+      <div class="notice" style="margin-bottom:12px">El podio se determina automáticamente según los resultados reales de la <strong>Gran Final</strong> y el <strong>Tercer puesto</strong>.</div>
+      ${teamCard('🥇', 'Campeón', champion, 'Pendiente — carga el resultado de la Final')}
+      ${teamCard('🥈', 'Subcampeón', runnerUp, 'Pendiente — carga el resultado de la Final')}
+      ${teamCard('🥉', 'Tercer lugar', thirdPlace, 'Pendiente — carga el resultado del 3er puesto')}
+    `;
+  },
+
+  async renderAdminUsers() {
+    const container = document.getElementById('admin-users');
+    try {
+      const [users, bracketData, koLb] = await Promise.all([
+        this.api('/admin/users'),
+        this.api('/admin/bracket-completion').catch(() => ({ users: [], totalKO: 0 })),
+        this.api('/leaderboard/knockout').catch(() => null)
+      ]);
+      const bracketBy = {};
+      (bracketData.users || []).forEach(b => { bracketBy[b.user_id] = b; });
+
+      // ── Estado del campeonato (eliminatorias) ──
+      let champSection = '';
+      if (koLb && koLb.leaderboard && koLb.leaderboard.length) {
+        const lb = koLb.leaderboard;
+        const cs = koLb.championStatus || {};
+        const leader = lb[0];
+        // El 1er lugar usa el cálculo RIGUROSO (canBeChampion, prueba de existencia
+        // contra el mejor mundo posible de cada usuario). El top-3 general usa una
+        // estimación más simple (máximo teórico vs el 4to puesto), marcada como tal.
+        const p4 = lb[3]?.points;
+        const contenders = lb.filter(u => u.canBeChampion);
+        const outOfChampionRace = lb.filter(u => !u.canBeChampion);
+        const roughTop3 = lb.filter(u => !u.canBeChampion && (p4 == null || u.maxPossible > p4));
+        const outOfPrizesRough = lb.filter(u => !u.canBeChampion && p4 != null && u.maxPossible <= p4);
+
+        const lockBanner = cs.locked
+          ? `<div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:linear-gradient(135deg,rgba(201,168,76,0.18),rgba(201,168,76,0.06));border:1px solid rgba(201,168,76,0.35);border-radius:8px;margin-bottom:10px">
+               <span style="font-size:20px">🔒</span>
+               <span style="font-size:13px"><strong style="color:#C9A84C">${cs.leaderName}</strong> ya aseguró matemáticamente el <strong>1er lugar</strong> con ${cs.leaderPoints} pts 🏆</span>
+             </div>`
+          : `<div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:8px;margin-bottom:10px">
+               <span style="font-size:18px">🏁</span>
+               <span style="font-size:13px">La pelea por el <strong>1er lugar</strong> sigue abierta: <strong>${cs.contendersCount}</strong> usuario(s) todavía tienen un camino matemático comprobado a ser campeón. Líder actual: <strong>${leader.display_name}</strong> (${leader.points} pts).</span>
+             </div>`;
+
+        const listItems = lb.map((u, i) => {
+          const pos = i + 1;
+          let tag, color;
+          if (u.canBeChampion) { tag = '🏆 puede ser 1º'; color = '#C9A84C'; }
+          else if (p4 == null || u.maxPossible > p4) { tag = 'compite por premio (est.)'; color = '#4ade80'; }
+          else { tag = 'fuera de premios (est.)'; color = '#f87171'; }
+          return `<tr style="border-bottom:1px solid var(--color-border)">
+            <td style="padding:4px 8px;color:var(--color-text-muted)">${pos}</td>
+            <td style="padding:4px 8px">${u.display_name}</td>
+            <td style="padding:4px 8px;text-align:right;font-weight:700">${u.points}</td>
+            <td style="padding:4px 8px;text-align:right;color:#4ade80">${u.maxPossible}</td>
+            <td style="padding:4px 8px;text-align:right;color:${color};font-size:11px;font-weight:600">${tag}</td>
+          </tr>`;
+        }).join('');
+
+        champSection = `
+          <div style="margin-bottom:16px;padding:14px;background:var(--color-surface-2);border:1px solid var(--color-border);border-radius:10px">
+            <h3 style="margin:0 0 10px;font-size:15px">🔒 Estado del campeonato · Eliminatorias</h3>
+            ${lockBanner}
+            <div style="font-size:12px;color:var(--color-text-muted);margin-bottom:8px">
+              ${outOfChampionRace.length} usuario(s) ya <strong>no pueden ser 1º</strong> (comprobado: ni en su mejor escenario posible superan a otro participante real). De esos, ${outOfPrizesRough.length} tampoco alcanzarían un puesto de premio (estimado).
+            </div>
+            <div style="overflow-x:auto">
+              <table style="width:100%;border-collapse:collapse;font-size:12px">
+                <thead><tr style="border-bottom:1px solid var(--color-border);color:var(--color-text-muted)">
+                  <th style="padding:4px 8px;text-align:left">#</th>
+                  <th style="padding:4px 8px;text-align:left">Usuario</th>
+                  <th style="padding:4px 8px;text-align:right">Puntos</th>
+                  <th style="padding:4px 8px;text-align:right" title="Máximo teórico alcanzable">Máx</th>
+                  <th style="padding:4px 8px;text-align:right">Estado</th>
+                </tr></thead>
+                <tbody>${listItems}</tbody>
+              </table>
+            </div>
+            <div style="font-size:10px;color:var(--color-text-muted);margin-top:8px">
+              <strong>🏆 puede ser 1º</strong> es un cálculo riguroso: se simula el mejor escenario futuro posible de cada usuario (todos sus partidos vivos acertados) y se recalculan los puntos de TODOS los demás en ese mismo escenario compartido, respetando caminos muertos. Si ni así supera a alguien, es matemáticamente imposible que sea 1º.<br>
+              Las etiquetas "compite por premio" / "fuera de premios" son una <strong>estimación</strong> (máximo teórico vs 4to puesto actual), no una prueba rigurosa como la del 1er lugar.
+            </div>
+          </div>`;
+      }
+
+      // Botón de descarga xlsx (generado en el frontend con los datos ya cargados)
+      const downloadBtn = `
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:10px">
+          <button onclick="app.downloadBackupDB()" style="display:inline-flex;align-items:center;gap:6px;padding:7px 14px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:8px;color:var(--color-text-muted);font-size:12px;font-weight:600;cursor:pointer">
+            🗄️ Descargar Backup DB
+          </button>
+          <button onclick="app.exportUsersXlsx()" style="display:inline-flex;align-items:center;gap:6px;padding:7px 14px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:8px;color:var(--color-text-muted);font-size:12px;font-weight:600;cursor:pointer">
+            📥 Descargar Excel
+          </button>
+        </div>`;
+
+      container.innerHTML = champSection + downloadBtn + users.map(u => {
+        const bracket = bracketBy[u.id];
+        const bracketChip = bracket
+          ? (bracket.complete
+              ? '<span class="chip" style="background:rgba(74,222,128,0.15);color:#4ade80">✅ Bracket completo</span>'
+              : `<span class="chip" style="background:rgba(251,191,36,0.15);color:#fbbf24">⚠️ Bracket incompleto (${bracket.filled}/${bracket.total})</span>`)
+          : '';
+        return `
+        <div class="user-row" data-user="${u.id}" style="align-items:flex-start">
+          <div class="user-row-info">
+            <input type="text" data-field="display_name" value="${u.display_name}" style="font-weight:500;margin-bottom:4px">
+            <small>usuario: <input type="text" data-field="username" value="${u.username}" style="padding:2px 6px;font-size:12px;width:auto;display:inline-block">
+            ${u.is_admin ? '<span class="chip admin">admin</span>' : ''}
+            </small>
+            <div style="display:flex;gap:4px;margin-top:6px;flex-wrap:wrap">
+              <span class="chip ${u.paid_groups ? 'paid' : 'unpaid'}">
+                Grupos: ${u.paid_groups ? '✓ Pagado' : 'Pendiente'}
+              </span>
+              <span class="chip ${u.paid_knockout ? 'paid' : 'unpaid'}">
+                Finales: ${u.paid_knockout ? '✓ Pagado' : 'Pendiente'}
+              </span>
+              ${u.is_admin ? '' : bracketChip}
+            </div>
+          </div>
+          <div style="display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end">
+            <button class="btn-sm ${u.paid_groups ? 'btn-ghost' : 'btn-accent'}" data-action="toggle-groups">
+              ${u.paid_groups ? 'Quitar GRUPOS' : 'Pagar GRUPOS'}
+            </button>
+            <button class="btn-sm ${u.paid_knockout ? 'btn-ghost' : 'btn-accent'}" data-action="toggle-knockout">
+              ${u.paid_knockout ? 'Quitar FINALES' : 'Pagar FINALES'}
+            </button>
+            <button class="btn-sm btn-ghost" data-action="save">Guardar</button>
+            <button class="btn-sm btn-ghost" data-action="reset">Reset pass</button>
+            ${u.id !== this.user.id ? '<button class="btn-sm btn-danger" data-action="delete">Eliminar</button>' : ''}
+          </div>
+        </div>
+      `;}).join('');
+      container.querySelectorAll('[data-user]').forEach(row => {
+        row.querySelectorAll('[data-action]').forEach(btn => {
+          btn.addEventListener('click', () => this.handleAdminUserAction(row, btn.dataset.action, users));
+        });
+      });
+    } catch (e) { container.innerHTML = `<div style="color:var(--color-danger)">Error: ${e.message}</div>`; }
+  },
+
+  async handleAdminUserAction(row, action, users) {
+    const userId = row.dataset.user;
+    const user = users.find(u => u.id == userId);
+    try {
+      if (action === 'save') {
+        await this.api(`/admin/users/${userId}`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            display_name: row.querySelector('[data-field=display_name]').value,
+            username: row.querySelector('[data-field=username]').value
+          })
+        });
+        alert('Guardado.');
+      } else if (action === 'toggle-groups') {
+        await this.api(`/admin/users/${userId}/polla/groups/paid`, {
+          method: 'PUT',
+          body: JSON.stringify({ paid: !user.paid_groups })
+        });
+        this.renderAdminUsers();
+        this.renderAdminPollasRegs();
+      } else if (action === 'toggle-knockout') {
+        await this.api(`/admin/users/${userId}/polla/knockout/paid`, {
+          method: 'PUT',
+          body: JSON.stringify({ paid: !user.paid_knockout })
+        });
+        this.renderAdminUsers();
+        this.renderAdminPollasRegs();
+      } else if (action === 'reset') {
+        const p = prompt('Nueva contraseña (min 4 caracteres):');
+        if (!p || p.length < 4) return;
+        await this.api(`/admin/users/${userId}/reset-password`, {
+          method: 'POST',
+          body: JSON.stringify({ password: p })
+        });
+        alert('Contraseña reseteada.');
+      } else if (action === 'delete') {
+        if (!confirm(`Eliminar a "${user.display_name}"?`)) return;
+        await this.api(`/admin/users/${userId}`, { method: 'DELETE' });
+        this.renderAdminUsers();
+      }
+    } catch (e) { alert('Error: ' + e.message); }
+  }
+};
+
+document.addEventListener('DOMContentLoaded', () => app.init());
