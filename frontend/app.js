@@ -2956,13 +2956,13 @@ const app = {
         const p3 = lb[2]?.points ?? 0;
         const p4 = lb[3]?.points;
 
-        // Mensaje positivo según lo que aún está en juego (Opción A: sin lenguaje negativo)
-        // El 1er lugar usa el cálculo RIGUROSO (canBeChampion); el top-3 usa una
-        // estimación más simple (su máximo teórico vs el 4to puesto actual).
+        // Mensaje con el MEJOR PUESTO POSIBLE riguroso (misma simulación que canBeChampion,
+        // generalizada: en su propio mejor mundo, en qué lugar queda comparado con todos).
+        const bestPos = me.bestPossiblePosition || pos;
         let nudge, nudgeColor;
-        if (me.canBeChampion) { nudge = '🔥 Todavía puedes llegar al 1er lugar'; nudgeColor = '#C9A84C'; }
-        else if (p4 == null || me.maxPossible > p4) { nudge = '💪 Sigues en la pelea por un puesto de premio'; nudgeColor = '#4ade80'; }
-        else { nudge = '🎮 Sigues sumando — juega por escalar posiciones'; nudgeColor = 'var(--color-text-muted)'; }
+        if (bestPos === 1) { nudge = '🔥 Todavía puedes llegar al 1er lugar'; nudgeColor = '#C9A84C'; }
+        else if (bestPos <= 3) { nudge = `💪 Tu mejor puesto posible: ${bestPos}º (premio)`; nudgeColor = '#4ade80'; }
+        else { nudge = `📊 Tu mejor puesto posible: ${bestPos}º`; nudgeColor = 'var(--color-text-muted)'; }
 
         const posMedal = pos === 1 ? '🥇' : pos === 2 ? '🥈' : pos === 3 ? '🥉' : `${pos}º`;
 
@@ -2985,7 +2985,7 @@ const app = {
                   <div style="font-size:18px;font-weight:700;color:#4ade80">${me.maxPossible}</div>
                 </div>
               </div>
-              <div style="font-size:12px;font-weight:600;color:${nudgeColor}">${nudge}</div>
+              <div style="font-size:12px;font-weight:600;color:${nudgeColor}" title="Cálculo riguroso: se simula tu mejor escenario futuro posible y se recalculan los puntos de todos los demás en ese mismo escenario, respetando caminos muertos.">${nudge}</div>
             </div>
             <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--color-border);display:flex;align-items:center;gap:16px;flex-wrap:wrap;font-size:12px">
               <span style="color:var(--color-text-muted);font-size:11px">Puestos con premio (puntos hoy):</span>
@@ -4277,14 +4277,11 @@ const app = {
         const lb = koLb.leaderboard;
         const cs = koLb.championStatus || {};
         const leader = lb[0];
-        // El 1er lugar usa el cálculo RIGUROSO (canBeChampion, prueba de existencia
-        // contra el mejor mundo posible de cada usuario). El top-3 general usa una
-        // estimación más simple (máximo teórico vs el 4to puesto), marcada como tal.
-        const p4 = lb[3]?.points;
-        const contenders = lb.filter(u => u.canBeChampion);
-        const outOfChampionRace = lb.filter(u => !u.canBeChampion);
-        const roughTop3 = lb.filter(u => !u.canBeChampion && (p4 == null || u.maxPossible > p4));
-        const outOfPrizesRough = lb.filter(u => !u.canBeChampion && p4 != null && u.maxPossible <= p4);
+        // "bestPossiblePosition" es riguroso para TODOS los puestos, no solo el 1º:
+        // se simula el mejor mundo posible de cada usuario y se ve en qué lugar
+        // queda al recalcular a todos los demás en ese mismo escenario compartido.
+        const outOfChampionRace = lb.filter(u => u.bestPossiblePosition > 1);
+        const outOfPrizes = lb.filter(u => u.bestPossiblePosition > 3);
 
         const lockBanner = cs.locked
           ? `<div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:linear-gradient(135deg,rgba(201,168,76,0.18),rgba(201,168,76,0.06));border:1px solid rgba(201,168,76,0.35);border-radius:8px;margin-bottom:10px">
@@ -4298,10 +4295,11 @@ const app = {
 
         const listItems = lb.map((u, i) => {
           const pos = i + 1;
+          const bp = u.bestPossiblePosition;
           let tag, color;
-          if (u.canBeChampion) { tag = '🏆 puede ser 1º'; color = '#C9A84C'; }
-          else if (p4 == null || u.maxPossible > p4) { tag = 'compite por premio (est.)'; color = '#4ade80'; }
-          else { tag = 'fuera de premios (est.)'; color = '#f87171'; }
+          if (bp === 1) { tag = '🏆 puede ser 1º'; color = '#C9A84C'; }
+          else if (bp <= 3) { tag = `sube hasta ${bp}º (premio)`; color = '#4ade80'; }
+          else { tag = `sube hasta ${bp}º`; color = '#f87171'; }
           return `<tr style="border-bottom:1px solid var(--color-border)">
             <td style="padding:4px 8px;color:var(--color-text-muted)">${pos}</td>
             <td style="padding:4px 8px">${u.display_name}</td>
@@ -4316,7 +4314,7 @@ const app = {
             <h3 style="margin:0 0 10px;font-size:15px">🔒 Estado del campeonato · Eliminatorias</h3>
             ${lockBanner}
             <div style="font-size:12px;color:var(--color-text-muted);margin-bottom:8px">
-              ${outOfChampionRace.length} usuario(s) ya <strong>no pueden ser 1º</strong> (comprobado: ni en su mejor escenario posible superan a otro participante real). De esos, ${outOfPrizesRough.length} tampoco alcanzarían un puesto de premio (estimado).
+              ${outOfChampionRace.length} usuario(s) ya <strong>no pueden ser 1º</strong> (comprobado). De esos, ${outOfPrizes.length} tampoco alcanzarían un puesto de premio, ni acertando todo lo que les queda vivo.
             </div>
             <div style="overflow-x:auto">
               <table style="width:100%;border-collapse:collapse;font-size:12px">
@@ -4325,14 +4323,13 @@ const app = {
                   <th style="padding:4px 8px;text-align:left">Usuario</th>
                   <th style="padding:4px 8px;text-align:right">Puntos</th>
                   <th style="padding:4px 8px;text-align:right" title="Máximo teórico alcanzable">Máx</th>
-                  <th style="padding:4px 8px;text-align:right">Estado</th>
+                  <th style="padding:4px 8px;text-align:right" title="Mejor puesto final que puede alcanzar (cálculo riguroso)">Mejor puesto posible</th>
                 </tr></thead>
                 <tbody>${listItems}</tbody>
               </table>
             </div>
             <div style="font-size:10px;color:var(--color-text-muted);margin-top:8px">
-              <strong>🏆 puede ser 1º</strong> es un cálculo riguroso: se simula el mejor escenario futuro posible de cada usuario (todos sus partidos vivos acertados) y se recalculan los puntos de TODOS los demás en ese mismo escenario compartido, respetando caminos muertos. Si ni así supera a alguien, es matemáticamente imposible que sea 1º.<br>
-              Las etiquetas "compite por premio" / "fuera de premios" son una <strong>estimación</strong> (máximo teórico vs 4to puesto actual), no una prueba rigurosa como la del 1er lugar.
+              <strong>Mejor puesto posible</strong> es un cálculo riguroso para TODOS los puestos: se simula el mejor escenario futuro de cada usuario (todos sus partidos vivos acertados) y se recalculan los puntos de TODOS los demás en ese mismo escenario compartido, respetando caminos muertos. Es el mejor lugar final que puede lograr — no una estimación.
             </div>
           </div>`;
       }
