@@ -780,6 +780,19 @@ app.get('/api/leaderboard/knockout', (req, res) => {
       resolved[matchId] = { homeCode, awayCode };
       return resolved[matchId];
     };
+    // Reconvergencia de cruce: si más allá de un error anterior, los DOS equipos
+    // reales de esta llave (ya confirmados) coinciden con los dos que predice el
+    // bracket del usuario, el cruce revivió — no hereda muerte de sus ancestros.
+    const reconvCache = {};
+    const hasReconverged = (matchId) => {
+      if (matchId in reconvCache) return reconvCache[matchId];
+      const real = matchById[matchId];
+      if (!real || !real.home_team || !real.away_team) return reconvCache[matchId] = false;
+      const { homeCode, awayCode } = resolveMatch(matchId);
+      const r = (homeCode === real.home_team && awayCode === real.away_team) ||
+                (homeCode === real.away_team && awayCode === real.home_team);
+      return reconvCache[matchId] = r;
+    };
     const deadCache = {};
     const isDead = (matchId) => {
       if (matchId in deadCache) return deadCache[matchId];
@@ -790,6 +803,14 @@ app.get('/api/leaderboard/knockout', (req, res) => {
         const { homeCode, awayCode } = resolveMatch(matchId);
         const predW = userWinnerOf(matchId, homeCode, awayCode);
         return deadCache[matchId] = (!!predW && predW !== real.winner);
+      }
+      if (hasReconverged(matchId)) {
+        if (real && real.home_score != null && real.winner) {
+          const { homeCode, awayCode } = resolveMatch(matchId);
+          const predW = userWinnerOf(matchId, homeCode, awayCode);
+          return deadCache[matchId] = (!!predW && predW !== real.winner);
+        }
+        return deadCache[matchId] = false;
       }
       if (matchId === 'TP') {
         if (isDead('SF-5') || isDead('SF-6')) return deadCache[matchId] = true;
@@ -811,8 +832,16 @@ app.get('/api/leaderboard/knockout', (req, res) => {
         total += ae ? 8 : 5;
         continue;
       }
-      if (isDead(mid)) continue;
       const pred = preds[mid];
+      // Los dieciseisavos (R32) nunca se anulan por completo: se califican
+      // siempre de forma directa, preservando el crédito parcial (p. ej. 3 pts
+      // por acertar el empate aunque se falle el ganador de la tanda de penales).
+      if (mid.startsWith('R32')) {
+        if (!pred || (pred.pred_home == null && pred.pred_winner == null)) continue;
+        total += calcKOMatchPoints(pred, real);
+        continue;
+      }
+      if (isDead(mid)) continue;
       if (!pred || (pred.pred_home == null && pred.pred_winner == null)) continue;
       total += calcKOMatchPoints(pred, real);
     }
