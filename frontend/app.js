@@ -943,13 +943,6 @@ const app = {
         <div class="bracket-legend" id="bracket-legend-real">
           <span style="font-weight:700;color:var(--color-text)">Leyenda:</span>
           <span><span style="display:inline-block;width:8px;height:8px;background:rgba(201,168,76,0.4);border-radius:2px;vertical-align:middle"></span> Ganador real</span>
-          <span><span style="color:#60a5fa">● </span>Mi pronóstico</span>
-          <span><span style="color:#4ade80">✓</span> Acerté · <span style="color:#f87171">✗</span> Fallé</span>
-        </div>
-        <div class="bracket-legend" id="bracket-legend-pred" style="display:none">
-          <span style="font-weight:700;color:var(--color-text)">Tu bracket:</span>
-          <span>Tal como lo pronosticaste</span>
-          <span><span style="opacity:0.4;filter:grayscale(0.8)">▦</span> <span style="color:#f87171">❌ eliminado</span> = ese camino ya no se puede dar</span>
         </div>
         <div class="pw-scroll-hint">← Desliza horizontalmente para ver el bracket completo →</div>
         <div class="bracket-slider-viewport">
@@ -992,7 +985,6 @@ const app = {
     const track = document.getElementById('bracket-slider-track');
     const btn = document.getElementById('bracket-toggle');
     const legendReal = document.getElementById('bracket-legend-real');
-    const legendPred = document.getElementById('bracket-legend-pred');
     if (!track || !btn) return;
 
     // Determinar el nuevo estado
@@ -1018,12 +1010,10 @@ const app = {
       current.textContent = '🔮 Mi Pronóstico';
       next.textContent = '🏆 Bracket Real';
       if (legendReal) legendReal.style.display = 'none';
-      if (legendPred) legendPred.style.display = 'flex';
     } else {
       current.textContent = '🏆 Bracket Real';
       next.textContent = '🔮 Mi Pronóstico';
       if (legendReal) legendReal.style.display = 'flex';
-      if (legendPred) legendPred.style.display = 'none';
     }
   },
 
@@ -2980,25 +2970,14 @@ const app = {
           </div>`;
       };
 
-      // Tarjeta personal + estado del campeonato (solo eliminatorias)
+      // Tarjeta personal (solo eliminatorias)
       const renderMyStanding = (data) => {
         const lb = data.leaderboard || [];
         if (!lb.length) return '';
         const myIdx = lb.findIndex(u => (u.user_id || u.id) === this.user.id);
-        const cs = data.championStatus;
 
-        // Banner de campeonato asegurado (se muestra a todos cuando aplica)
-        let banner = '';
-        if (cs && cs.locked && cs.leaderName) {
-          const first = cs.leaderName.split(' ')[0];
-          banner = `<div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:linear-gradient(135deg,rgba(201,168,76,0.18),rgba(201,168,76,0.06));border:1px solid rgba(201,168,76,0.35);border-radius:10px;margin-bottom:10px">
-            <span style="font-size:20px">🔒</span>
-            <span style="font-size:13px"><strong style="color:#C9A84C">${first}</strong> ya aseguró matemáticamente el <strong>1er lugar</strong> 🏆</span>
-          </div>`;
-        }
-
-        // Si el usuario no está inscrito en eliminatorias, solo el banner
-        if (myIdx < 0) return banner;
+        // Si el usuario no está inscrito en eliminatorias, no mostrar tarjeta
+        if (myIdx < 0) return '';
 
         const me = lb[myIdx];
         const pos = myIdx + 1;
@@ -3017,7 +2996,7 @@ const app = {
 
         const posMedal = pos === 1 ? '🥇' : pos === 2 ? '🥈' : pos === 3 ? '🥉' : `${pos}º`;
 
-        return `${banner}
+        return `
           <div style="padding:12px 14px;background:var(--color-surface);border:1px solid rgba(201,168,76,0.25);border-radius:10px;margin-bottom:12px">
             <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
               <div style="display:flex;align-items:center;gap:14px">
@@ -4334,14 +4313,9 @@ const app = {
         const outOfChampionRace = lb.filter(u => u.bestPossiblePosition > 1);
         const outOfPrizes = lb.filter(u => u.bestPossiblePosition > 3);
 
-        const lockBanner = cs.locked
-          ? `<div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:linear-gradient(135deg,rgba(201,168,76,0.18),rgba(201,168,76,0.06));border:1px solid rgba(201,168,76,0.35);border-radius:8px;margin-bottom:10px">
-               <span style="font-size:20px">🔒</span>
-               <span style="font-size:13px"><strong style="color:#C9A84C">${cs.leaderName}</strong> ya aseguró matemáticamente el <strong>1er lugar</strong> con ${cs.leaderPoints} pts 🏆</span>
-             </div>`
-          : `<div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:8px;margin-bottom:10px">
+        const lockBanner = `<div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:8px;margin-bottom:10px">
                <span style="font-size:18px">🏁</span>
-               <span style="font-size:13px">La pelea por el <strong>1er lugar</strong> sigue abierta: <strong>${cs.contendersCount}</strong> usuario(s) todavía tienen un camino matemático comprobado a ser campeón. Líder actual: <strong>${leader.display_name}</strong> (${leader.points} pts).</span>
+               <span style="font-size:13px"><strong>${cs.contendersCount}</strong> usuario(s) con camino matemático al <strong>1er lugar</strong>. Líder actual: <strong>${leader.display_name}</strong> (${leader.points} pts).</span>
              </div>`;
 
         const listItems = lb.map((u, i) => {
