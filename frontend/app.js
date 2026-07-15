@@ -776,12 +776,6 @@ const app = {
         .bracket-toggle-btn .btg-current { color:var(--color-primary); }
         .bracket-toggle-btn .btg-arrow { color:var(--color-text-muted); font-size:15px; }
         .bracket-toggle-btn .btg-next { color:var(--color-text-muted); font-size:12px; }
-        .bracket-legend {
-          display:flex; gap:14px; flex-wrap:wrap; align-items:center;
-          font-size:11px; color:var(--color-text-muted); margin-bottom:8px;
-          padding:6px 10px; background:var(--color-surface);
-          border:1px solid var(--color-border); border-radius:8px;
-        }
         .bracket-slider-viewport { overflow:hidden; width:100%; }
         .bracket-slider-track {
           display:flex; width:200%;
@@ -940,10 +934,6 @@ const app = {
             <span class="btg-next">🔮 Mi Pronóstico</span>
           </button>
         </div>
-        <div class="bracket-legend" id="bracket-legend-real">
-          <span style="font-weight:700;color:var(--color-text)">Leyenda:</span>
-          <span><span style="display:inline-block;width:8px;height:8px;background:rgba(201,168,76,0.4);border-radius:2px;vertical-align:middle"></span> Ganador real</span>
-        </div>
         <div class="pw-scroll-hint">← Desliza horizontalmente para ver el bracket completo →</div>
         <div class="bracket-slider-viewport">
           <div class="bracket-slider-track" id="bracket-slider-track">
@@ -984,7 +974,6 @@ const app = {
   toggleBracketView(forceToPred) {
     const track = document.getElementById('bracket-slider-track');
     const btn = document.getElementById('bracket-toggle');
-    const legendReal = document.getElementById('bracket-legend-real');
     if (!track || !btn) return;
 
     // Determinar el nuevo estado
@@ -1009,11 +998,9 @@ const app = {
     if (goingToPred) {
       current.textContent = '🔮 Mi Pronóstico';
       next.textContent = '🏆 Bracket Real';
-      if (legendReal) legendReal.style.display = 'none';
     } else {
       current.textContent = '🏆 Bracket Real';
       next.textContent = '🔮 Mi Pronóstico';
-      if (legendReal) legendReal.style.display = 'flex';
     }
   },
 
